@@ -2,23 +2,30 @@
 """
 VNengine - project packager (Windows).
 
-This lives inside your project (``<project>/tools/``). Run it from anywhere to
-turn the project into a distributable folder - think of it as the "Build"
-button:
+Ships inside every project at ``<project>/tools/``. Run it from the project
+root - the "Build" button:
 
-    python tools/projectpackager-windows.py
+    projectpackager-windows            (or: python tools/projectpackager-windows.py)
 
-Produces:
+Produces a distributable folder:
 
     <output>/<Project>/
-        <Project>.exe     playtest.py frozen into one file
-        index.html        copied as-is
-        <Project>.pak      css/ + js/ + src/ zipped
+        <Project>.exe      the game runtime (playtest.py frozen)
+        index.html         copied as-is
+        <Project>.pak      css/ + js/ + src/, packed
 
-The .exe is a tiny local server: on launch it finds the .pak next to it and
-serves css/js/src straight out of it, so index.html never has to change.
+On the first run (or whenever ``playtest.py`` changed) it freezes the runtime
+via ``projectpackager-tools/build-runtime.py`` and caches it; after that it is
+just copy + zip. Nothing is prebuilt and shipped - the runtime always matches
+the current ``playtest.py``.
 
-Everything runs on the command line - no GUI at any point.
+Everything this tool needs lives under ``tools/``:
+
+    tools/
+      projectpackager-windows(.py/.exe)
+      projectpackager-tools/
+        build-runtime.py       does the freezing
+        cache/                 built runtime + a hash of playtest.py
 """
 
 import os
@@ -26,14 +33,30 @@ import re
 import sys
 import json
 import shutil
-import zipfile
-import tempfile
+import hashlib
 import subprocess
 
 ARCHIVE_DIRS = ("css", "js", "src")
 
-# <project>/tools/this_file  ->  <project>
-PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FROZEN = getattr(sys, "frozen", False)
+
+
+def _self_dir():
+    """Folder this program actually sits in.
+
+    As a script: the folder of this file. Frozen into an .exe: the folder of
+    the .exe - NOT ``__file__`` / ``sys._MEIPASS``, which point at a throwaway
+    unpack dir under %TEMP%.
+    """
+    anchor = sys.executable if FROZEN else __file__
+    return os.path.dirname(os.path.abspath(anchor))
+
+
+PP_TOOLS = os.path.join(_self_dir(), "projectpackager-tools")
+BUILD_RUNTIME = os.path.join(PP_TOOLS, "build-runtime.py")
+CACHE_DIR = os.path.join(PP_TOOLS, "cache")
+CACHED_EXE = os.path.join(CACHE_DIR, "runtime-windows.exe")
+CACHED_SIG = os.path.join(CACHE_DIR, "playtest.sha256")
 
 
 def ask(prompt, default=""):
@@ -63,15 +86,6 @@ def ask_yes(prompt):
         return False
 
 
-def check_deps():
-    # The freezer backend. Bundled in the shipped .exe build of this tool;
-    # when running this file as a plain script it must be importable.
-    try:
-        import PyInstaller  # noqa: F401
-    except ImportError:
-        sys.exit("packaging backend is not available in this environment.")
-
-
 def project_name(project_dir):
     meta = os.path.join(project_dir, "project.json")
     if os.path.isfile(meta):
@@ -90,36 +104,92 @@ def is_project(path):
             os.path.isfile(os.path.join(path, "index.html")))
 
 
-def build_exe(project_dir, name, console, work):
-    """Run PyInstaller; return the path to the produced .exe."""
-    dist = os.path.join(work, "dist")
-    args = [
-        sys.executable, "-m", "PyInstaller",
-        "--noconfirm", "--clean", "--onefile",
-        "--name", name,
-        "--console" if console else "--windowed",
-        "--distpath", dist,
-        "--workpath", os.path.join(work, "build"),
-        "--specpath", work,
-    ]
-    icon = os.path.join(project_dir, "icon.ico")
-    if os.path.isfile(icon):
-        args += ["--icon", icon]
-    args.append(os.path.join(project_dir, "playtest.py"))
+def find_project():
+    """Locate the project folder, whatever the layout.
 
-    print("\nBuilding %s.exe (onefile, %s) ...\n" %
-          (name, "console" if console else "windowed"))
-    rc = subprocess.call(args)
-    if rc != 0:
-        sys.exit("PyInstaller exited with code %d" % rc)
+    Walks up from the current directory and from this program's own folder,
+    returning the first ancestor that looks like a project. Handles: run from
+    the project root, this tool sitting in <project>/tools/ (as a script, a
+    onefile .exe, or a onedir .exe in its own subfolder), etc.
+    """
+    starts = [os.getcwd(), _self_dir()]
+    if not FROZEN:
+        starts.append(os.path.dirname(os.path.abspath(__file__)))
+    seen = set()
+    for start in starts:
+        p = os.path.abspath(start)
+        for _ in range(6):
+            if p in seen:
+                break
+            seen.add(p)
+            if is_project(p):
+                return p
+            parent = os.path.dirname(p)
+            if parent == p:
+                break
+            p = parent
+    return None
 
-    exe = os.path.join(dist, name + ".exe")
-    if not os.path.isfile(exe):
-        sys.exit("build finished but %s was not found" % exe)
-    return exe
+
+def _python():
+    """An interpreter that can run build-runtime.py.
+
+    As a script that's just us. Frozen, sys.executable is the packager .exe,
+    so look for a real Python - bundled next to build-runtime.py first, then
+    on PATH.
+    """
+    if not FROZEN:
+        return sys.executable
+    local = os.path.join(PP_TOOLS, "python", "python.exe")
+    if os.path.isfile(local):
+        return local
+    return shutil.which("python") or shutil.which("py")
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def ensure_runtime(project_dir):
+    """Return a runtime .exe built from this project's playtest.py.
+
+    Cached under projectpackager-tools/cache/ and rebuilt only when
+    playtest.py changed."""
+    playtest = os.path.join(project_dir, "playtest.py")
+    sig = _sha256(playtest)
+
+    if os.path.isfile(CACHED_EXE) and os.path.isfile(CACHED_SIG):
+        try:
+            with open(CACHED_SIG) as f:
+                if f.read().strip() == sig:
+                    print("Runtime: cached (playtest.py unchanged)")
+                    return CACHED_EXE
+        except OSError:
+            pass
+
+    if not os.path.isfile(BUILD_RUNTIME):
+        sys.exit("missing: %s" % BUILD_RUNTIME)
+    py = _python()
+    if not py:
+        sys.exit("no Python found to build the runtime - put one at\n"
+                 "  %s\n" % os.path.join(PP_TOOLS, "python", "python.exe"))
+
+    print("Runtime: building from playtest.py ...\n")
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    rc = subprocess.call([py, BUILD_RUNTIME, playtest, CACHE_DIR])
+    if rc != 0 or not os.path.isfile(CACHED_EXE):
+        sys.exit("runtime build failed")
+    with open(CACHED_SIG, "w") as f:
+        f.write(sig)
+    return CACHED_EXE
 
 
 def build_archive(project_dir, archive_path):
+    import zipfile
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for d in ARCHIVE_DIRS:
             src = os.path.join(project_dir, d)
@@ -133,16 +203,12 @@ def build_archive(project_dir, archive_path):
 
 
 def main():
-    if os.name != "nt":
-        print("warning: this tool targets Windows; the build step needs Windows.\n")
-
-    check_deps()
     print("VNengine - project packager\n")
 
-    project_dir = PROJECT_DIR
-    if not is_project(project_dir):
-        print("(%s doesn't look like a project)" % project_dir)
-        while not is_project(project_dir):
+    project_dir = find_project()
+    if project_dir is None:
+        print("(couldn't find a project automatically)")
+        while project_dir is None or not is_project(project_dir):
             project_dir = os.path.abspath(os.path.expanduser(
                 ask("Path to the project folder")))
             if not is_project(project_dir):
@@ -151,10 +217,6 @@ def main():
 
     name = project_name(project_dir)
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_") or "game"
-
-    build_type = ask_choice("Build type:", ["window based", "console based"],
-                            "window based")
-    console = build_type == "console based"
 
     ext = ask_choice("Archive format:", [".pak", ".zip"], ".pak")
 
@@ -167,13 +229,9 @@ def main():
         shutil.rmtree(out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
-    work = tempfile.mkdtemp(prefix="vnpack_")
-    try:
-        exe = build_exe(project_dir, safe, console, work)
-        shutil.copy2(exe, os.path.join(out_dir, safe + ".exe"))
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+    runtime = ensure_runtime(project_dir)
 
+    shutil.copy2(runtime, os.path.join(out_dir, safe + ".exe"))
     shutil.copy2(os.path.join(project_dir, "index.html"),
                  os.path.join(out_dir, "index.html"))
     build_archive(project_dir, os.path.join(out_dir, safe + ext))

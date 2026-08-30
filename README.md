@@ -60,7 +60,7 @@ more reliable.)
 ### Ship a distributable
 
 From the project folder, run the packager — `projectpackager-windows.exe`, in
-`tools/`:
+`tools/`. Pick an archive format and an output folder; you get:
 
 ```
 <output>/<Project>/
@@ -72,6 +72,10 @@ From the project folder, run the packager — `projectpackager-windows.exe`, in
 Anyone double-clicks `<Project>.exe`: it starts the local runtime, reads the
 assets straight out of the `.pak`, and opens the game in their browser. Nothing
 to install on their side.
+
+The first run freezes the runtime from your `playtest.py` (via
+`tools/projectpackager-tools/`) and caches it; later runs reuse it and only
+rebuild when `playtest.py` changes. After that it's just copy + zip.
 
 ---
 
@@ -85,7 +89,7 @@ js/story.js       your script           -> window.VNScript  (EDIT THIS)
 js/audio.js       music + sound engine  -> window.VNAudio   (reusable as-is)
 js/engine.js      the runtime           (usually left alone)
 src/              your images and audio
-tools/            the packager
+tools/            the packager (the "Build" step) + everything it needs
 VNengine.md       the full manual — every op, with examples
 ```
 
@@ -102,11 +106,14 @@ source form**; the [Releases](../../releases) page publishes the compiled
 `.exe` builds (`setup.exe`, and the packager that ships inside each project).
 
 ```
-setup.py       scaffold a new project            (published as setup.exe)
-template/      the engine — copied wholesale into every new project
+setup.py           scaffold a new project        (published as setup.exe)
+template/          the engine — copied wholesale into every new project
   index.html  playtest.py  VNengine.md
   css/  js/  src/
-  tools/projectpackager-windows.py               (published as .exe, in-project)
+  tools/
+    projectpackager-windows.py    the "Build" step  (published as .exe, in-project)
+    projectpackager-tools/
+      build-runtime.py            freezes playtest.py into the game runtime
 ```
 
 `template/` is the source of truth for the engine; you never run it in place —
