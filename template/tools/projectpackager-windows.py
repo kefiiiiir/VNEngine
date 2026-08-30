@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
 """
-VNengine tool - projectpackager (Windows).
+VNengine - project packager (Windows).
 
-Turns a project folder (made by setup.py) into a distributable folder:
+This lives inside your project (``<project>/tools/``). Run it from anywhere to
+turn the project into a distributable folder - think of it as the "Build"
+button:
+
+    python tools/projectpackager-windows.py
+
+Produces:
 
     <output>/<Project>/
-        <Project>.exe     playtest.py frozen with PyInstaller (onefile)
+        <Project>.exe     playtest.py frozen into one file
         index.html        copied as-is
         <Project>.pak      css/ + js/ + src/ zipped
 
 The .exe is a tiny local server: on launch it finds the .pak next to it and
 serves css/js/src straight out of it, so index.html never has to change.
 
-Build is driven through auto-py-to-exe in headless CLI mode (`-c config.json
--o out`) - its GUI is never opened.
-
-    python tools/projectpackager-windows.py
-
-Requires:  pip install auto-py-to-exe
+Everything runs on the command line - no GUI at any point.
 """
 
 import os
@@ -31,13 +32,16 @@ import subprocess
 
 ARCHIVE_DIRS = ("css", "js", "src")
 
+# <project>/tools/this_file  ->  <project>
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 
 def ask(prompt, default=""):
     suffix = " [%s]" % default if default else ""
     try:
         val = input("%s%s: " % (prompt, suffix)).strip()
     except EOFError:
-        val = ""
+        sys.exit("\ncancelled: end of input.")
     return val or default
 
 
@@ -60,14 +64,12 @@ def ask_yes(prompt):
 
 
 def check_deps():
-    try:
-        import auto_py_to_exe  # noqa: F401
-    except ImportError:
-        sys.exit("auto-py-to-exe is not installed.\n  pip install auto-py-to-exe")
+    # The freezer backend. Bundled in the shipped .exe build of this tool;
+    # when running this file as a plain script it must be importable.
     try:
         import PyInstaller  # noqa: F401
     except ImportError:
-        sys.exit("PyInstaller is not installed.\n  pip install auto-py-to-exe")
+        sys.exit("packaging backend is not available in this environment.")
 
 
 def project_name(project_dir):
@@ -83,34 +85,38 @@ def project_name(project_dir):
     return os.path.basename(os.path.normpath(project_dir))
 
 
-def write_config(cfg_path, script, name, console, icon):
-    opts = [
-        {"optionDest": "noconfirm", "value": True, "enabled": True},
-        {"optionDest": "filenames", "value": script, "enabled": True},
-        {"optionDest": "onefile", "value": True, "enabled": True},
-        {"optionDest": "console", "value": bool(console), "enabled": True},
-        {"optionDest": "name", "value": name, "enabled": True},
+def is_project(path):
+    return (os.path.isfile(os.path.join(path, "playtest.py")) and
+            os.path.isfile(os.path.join(path, "index.html")))
+
+
+def build_exe(project_dir, name, console, work):
+    """Run PyInstaller; return the path to the produced .exe."""
+    dist = os.path.join(work, "dist")
+    args = [
+        sys.executable, "-m", "PyInstaller",
+        "--noconfirm", "--clean", "--onefile",
+        "--name", name,
+        "--console" if console else "--windowed",
+        "--distpath", dist,
+        "--workpath", os.path.join(work, "build"),
+        "--specpath", work,
     ]
-    if icon:
-        opts.append({"optionDest": "icon_file", "value": icon, "enabled": True})
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "version": "auto-py-to-exe-configuration_v1",
-            "pyinstallerOptions": opts,
-            "nonPyinstallerOptions": {
-                "increaseRecursionLimit": True,
-                "manualArguments": "",
-            },
-        }, f, indent=2)
+    icon = os.path.join(project_dir, "icon.ico")
+    if os.path.isfile(icon):
+        args += ["--icon", icon]
+    args.append(os.path.join(project_dir, "playtest.py"))
 
+    print("\nBuilding %s.exe (onefile, %s) ...\n" %
+          (name, "console" if console else "windowed"))
+    rc = subprocess.call(args)
+    if rc != 0:
+        sys.exit("PyInstaller exited with code %d" % rc)
 
-def find_exe(root, name):
-    target = name.lower() + ".exe"
-    for dirpath, _, files in os.walk(root):
-        for fn in files:
-            if fn.lower() == target:
-                return os.path.join(dirpath, fn)
-    return None
+    exe = os.path.join(dist, name + ".exe")
+    if not os.path.isfile(exe):
+        sys.exit("build finished but %s was not found" % exe)
+    return exe
 
 
 def build_archive(project_dir, archive_path):
@@ -133,15 +139,15 @@ def main():
     check_deps()
     print("VNengine - project packager\n")
 
-    project_dir = ""
-    while True:
-        project_dir = os.path.abspath(os.path.expanduser(
-            ask("Path to the project folder", os.getcwd())))
-        ok = (os.path.isfile(os.path.join(project_dir, "playtest.py")) and
-              os.path.isfile(os.path.join(project_dir, "index.html")))
-        if ok:
-            break
-        print("  -> needs both playtest.py and index.html; try again.\n")
+    project_dir = PROJECT_DIR
+    if not is_project(project_dir):
+        print("(%s doesn't look like a project)" % project_dir)
+        while not is_project(project_dir):
+            project_dir = os.path.abspath(os.path.expanduser(
+                ask("Path to the project folder")))
+            if not is_project(project_dir):
+                print("  -> needs both playtest.py and index.html; try again.\n")
+    print("Project: %s" % project_dir)
 
     name = project_name(project_dir)
     safe = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_") or "game"
@@ -153,7 +159,7 @@ def main():
     ext = ask_choice("Archive format:", [".pak", ".zip"], ".pak")
 
     out_root = os.path.abspath(os.path.expanduser(
-        ask("Output directory", os.getcwd())))
+        ask("Output directory", os.path.join(project_dir, "dist"))))
     out_dir = os.path.join(out_root, safe)
     if os.path.isdir(out_dir) and os.listdir(out_dir):
         if not ask_yes("%s exists and is not empty. Overwrite?" % out_dir):
@@ -161,34 +167,12 @@ def main():
         shutil.rmtree(out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
-    icon = os.path.join(project_dir, "icon.ico")
-    icon = icon if os.path.isfile(icon) else ""
-
     work = tempfile.mkdtemp(prefix="vnpack_")
     try:
-        cfg = os.path.join(work, "config.json")
-        apte_out = os.path.join(work, "dist")
-        write_config(cfg, os.path.join(project_dir, "playtest.py"),
-                     safe, console, icon)
-
-        print("\nBuilding %s.exe (%s, onefile) ...\n" % (safe, build_type))
-        rc = subprocess.call([sys.executable, "-m", "auto_py_to_exe",
-                              "-c", cfg, "-o", apte_out])
-        if rc != 0:
-            sys.exit("auto-py-to-exe exited with code %d" % rc)
-
-        exe = find_exe(apte_out, safe)
-        if not exe:
-            sys.exit("build finished but %s.exe was not found under %s" %
-                     (safe, apte_out))
+        exe = build_exe(project_dir, safe, console, work)
         shutil.copy2(exe, os.path.join(out_dir, safe + ".exe"))
     finally:
         shutil.rmtree(work, ignore_errors=True)
-        for stray in (safe + ".spec",):
-            if os.path.isfile(stray):
-                os.remove(stray)
-        if os.path.isdir("build"):
-            shutil.rmtree("build", ignore_errors=True)
 
     shutil.copy2(os.path.join(project_dir, "index.html"),
                  os.path.join(out_dir, "index.html"))

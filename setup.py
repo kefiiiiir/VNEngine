@@ -39,7 +39,7 @@ def ask(prompt, default=""):
     try:
         val = input("%s%s: " % (prompt, suffix)).strip()
     except EOFError:
-        val = ""
+        sys.exit("\ncancelled: end of input.")
     return val or default
 
 
@@ -102,7 +102,8 @@ def main():
     print("\nCreated %s" % dest)
     print("\nNext:")
     print("  cd %s" % dest)
-    print("  python playtest.py")
+    print("  python playtest.py                      # play it")
+    print("  python tools/projectpackager-windows.py # build it")
 
 
 if __name__ == "__main__":
