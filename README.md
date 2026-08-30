@@ -32,8 +32,8 @@ top of `css/style.css`.
 
 ## Get started
 
-**Download — the normal way.** Grab `setup.exe` from the
-[Releases](../../releases) page and run it. Nothing to install.
+**Download — the normal way.** Grab `VNEngine-Dist.zip` from the
+[Releases](../../releases) page, extract it and run `setup.exe`.
 
 **From source.** This repo is plain Python, open source. Same thing:
 
