@@ -360,11 +360,43 @@ def _template_dir():
     return None
 
 
-def patch_title(index_html, title):
+def _esc(s):
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def patch_index(index_html, title, author):
+    """Rewrite <title>, the title-screen logo block and the credit line so a
+    fresh project stops looking like the engine demo."""
     with open(index_html, "r", encoding="utf-8") as f:
         html = f.read()
-    html = re.sub(r"<title>.*?</title>",
-                  "<title>%s</title>" % title, html, count=1, flags=re.S)
+
+    def sub1(pattern, replacement):
+        # function replacement -> no backreference interpretation on user text
+        return re.sub(pattern, lambda m: replacement, html, count=1, flags=re.S)
+
+    html = sub1(r"<title>.*?</title>", "<title>%s</title>" % _esc(title))
+
+    parts = title.split(" ", 1)
+    span_a = _esc(parts[0])
+    span_b = _esc(parts[1]) if len(parts) > 1 else ""
+    sub = _esc(author) if author else _esc(title)
+    logo = '<span class="logo-a">%s</span>' % span_a
+    if span_b:
+        logo += '\n        <span class="logo-b">%s</span>' % span_b
+    logo += '\n        <span class="logo-sub">%s</span>' % sub
+    html = sub1(
+        r"<!-- LOGO:start.*?-->.*?<!-- LOGO:end -->",
+        '<!-- LOGO:start -->\n      <h1 class="logo">\n        %s\n      </h1>\n      <!-- LOGO:end -->' % logo,
+    )
+
+    year = datetime.date.today().year
+    credit = ("by %s &middot; %s" % (_esc(author), year)) if author else _esc(title)
+    html = sub1(
+        r"<!-- CREDIT:start.*?-->.*?<!-- CREDIT:end -->",
+        '<!-- CREDIT:start -->\n      <p class="title-credit">%s</p>\n      <!-- CREDIT:end -->' % credit,
+    )
+
     with open(index_html, "w", encoding="utf-8") as f:
         f.write(html)
 
@@ -400,7 +432,7 @@ def main():
 
         index_html = os.path.join(dest, "index.html")
         if os.path.isfile(index_html):
-            patch_title(index_html, title)
+            patch_index(index_html, title, author)
 
         with open(os.path.join(dest, "project.json"), "w", encoding="utf-8") as f:
             json.dump({

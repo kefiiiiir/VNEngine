@@ -4,10 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>VNengine - demo</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;600;700&family=Nunito:ital,wght@0,400;0,700;0,800;1,400&family=Caveat:wght@500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=1">
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <div id="game">
@@ -16,11 +13,13 @@
   <section class="screen screen--title" data-screen="title">
     <div class="title-bg"></div>
     <div class="title-inner">
+      <!-- LOGO:start (setup.py rewrites this block from project.json) -->
       <h1 class="logo">
         <span class="logo-a">VN</span>
         <span class="logo-b">engine</span>
         <span class="logo-sub">a code-first visual novel engine</span>
       </h1>
+      <!-- LOGO:end -->
       <nav class="menu" id="titleMenu">
         <button data-action="new">New game</button>
         <button data-action="continue" id="btnContinue" disabled>Continue</button>
@@ -28,7 +27,9 @@
         <button data-action="settings">Settings</button>
         <button data-action="wipe" class="menu-danger">Erase save</button>
       </nav>
+      <!-- CREDIT:start (setup.py rewrites this line from project.json) -->
       <p class="title-credit">edit <code>js/story.js</code> and <code>js/data.js</code> to build your own &middot; see <code>VNengine.md</code></p>
+      <!-- CREDIT:end -->
     </div>
   </section>
 
@@ -67,7 +68,14 @@
 
     <div class="choices" id="choices" hidden></div>
 
+    <div class="vn-modes">
+      <span class="vn-mode" id="autoBadge" hidden>AUTO</span>
+      <span class="vn-mode" id="skipBadge" hidden>SKIP</span>
+    </div>
+
     <div class="vn-topbar">
+      <button id="btnRollback" title="Back one line (wheel up / PageUp)">↶</button>
+      <button id="btnBacklog" title="History (L)">▤</button>
       <button id="btnSave" title="Save checkpoint">💾</button>
       <button id="btnSettings" title="Settings">⚙</button>
       <button id="btnQuit" title="To menu">✕</button>
@@ -105,6 +113,12 @@
       <label class="row">
         <input type="checkbox" id="setSkipSeen"> Fast-forward seen text
       </label>
+      <label>Auto-advance delay
+        <input type="range" id="setAutoDelay" min="400" max="4000" step="100" value="1500">
+      </label>
+      <label class="row">
+        <input type="checkbox" id="setSkipUnseen"> Skip unseen text too
+      </label>
       <button id="settingsClose">Close</button>
     </div>
   </div>
@@ -119,12 +133,31 @@
     </div>
   </div>
 
+  <!-- ================= BACKLOG OVERLAY ================= -->
+  <div class="overlay" id="backlogOverlay" hidden>
+    <div class="overlay-card overlay-card--wide">
+      <h2>History</h2>
+      <ul class="cp-list bl-list" id="backlogList"></ul>
+      <button id="backlogClose">Close</button>
+    </div>
+  </div>
+
+  <!-- ================= SCRIPT-CHANGED OVERLAY ================= -->
+  <div class="overlay" id="compatOverlay" hidden>
+    <div class="overlay-card">
+      <h2>Save may be out of date</h2>
+      <p class="cp-hint" id="compatText"></p>
+      <button id="compatResume">Resume anyway</button>
+      <button id="compatRestart">Restart this chapter</button>
+      <button id="compatTitle">Back to title</button>
+    </div>
+  </div>
+
 </div>
 
-<!-- ?v=N - bump when you change a file so the browser drops its cache -->
-<script src="js/audio.js?v=1"></script>
-<script src="js/data.js?v=1"></script>
-<script src="js/story.js?v=1"></script>
-<script src="js/engine.js?v=1"></script>
+<script src="js/audio.js"></script>
+<script src="js/data.js"></script>
+<script src="js/story.js"></script>
+<script src="js/engine.js"></script>
 </body>
 </html>

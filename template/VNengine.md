@@ -20,12 +20,14 @@ from `file://`, including saves (via `localStorage`).
 that:
 
 ```bash
-python playtest.py            # http://localhost:8000/index.html
-python playtest.py 5500       # pick another port
+python playtest.py            # first free port from 8000 up
+python playtest.py 5500       # prefer this port (falls forward if taken)
 ```
 
-`playtest.py` is a minimal static file server and nothing else. Set
-`VN_NO_BROWSER=1` to stop it opening a tab. `Ctrl+C` stops it.
+`playtest.py` is a minimal static file server and nothing else. In dev
+mode it sends `Cache-Control: no-store`, so the browser always has your
+latest edit - just reload, no cache-busting needed. Set `VN_NO_BROWSER=1`
+to stop it opening a tab. `Ctrl+C` stops it.
 
 ---
 
@@ -42,8 +44,13 @@ src/              your images and audio (see src/README.md)
 ```
 
 Load order in `index.html` matters: `audio.js`, `data.js`, `story.js`,
-then `engine.js`. Bump the `?v=` query on the `<script>`/`<link>` tags
-when you change a file so the browser drops its cache.
+then `engine.js`. Fonts are bundled in `src/fonts/` and `@font-face`d in
+`style.css` - nothing is fetched from the network.
+
+At boot the engine validates your script and prints anything suspect to
+the browser console (unknown `jump`/`choice` targets, duplicate labels,
+characters or sfx names it doesn't recognise, unreachable ops), each with
+the op index. It never stops the game - it just tells you.
 
 ---
 
@@ -97,14 +104,27 @@ redirect it.
 
 Usable in any spoken or narration string:
 
-| token     | becomes                     |
-|-----------|-----------------------------|
-| `{first}` | player first name           |
-| `{last}`  | player last name            |
-| `{name}`  | `"first last"` trimmed      |
+| token       | becomes                                   |
+|-------------|-------------------------------------------|
+| `{first}`   | player first name                         |
+| `{last}`    | player last name                         |
+| `{name}`    | `"first last"` trimmed                    |
+| `{anyVar}`  | the value of `s.vars.anyVar` from `set()` |
 
-The name comes from the built-in name-entry screen shown on **New game**.
-Don't need it? Leave the fields blank - `{first}` falls back to `"Player"`.
+Unknown `{tokens}` are left as-is. The name comes from the built-in
+name-entry screen shown on **New game**. Don't need it? Leave the fields
+blank - `{first}` falls back to `"Player"`.
+
+### Text markup
+
+Applied **after** escaping, so player names and variable values can never
+inject HTML:
+
+| markup            | renders          |
+|-------------------|------------------|
+| `[b]bold[/b]`     | **bold**         |
+| `[i]italic[/i]`   | *italic*         |
+| `[c=#ff8ec4]…[/c]` | coloured span (hex or CSS colour name only) |
 
 ### Stage
 
@@ -120,12 +140,19 @@ The speaking character is auto-highlighted; the rest dim.
 
 | op | signature | example |
 |----|-----------|---------|
-| `say` | `say(who, text, expr)` | `say('ari', 'Hi, {first}!', 'talk')` - `expr` also swaps the on-stage sprite |
+| `say` | `say(who, text, expr, voice)` | `say('ari', 'Hi, {first}!', 'talk')` - `expr` also swaps the on-stage sprite; `voice` is an optional `SFX_FILES` name played for the line |
 | `narr` | `narr(text)` | `narr('The room is empty.')` - narration, no name box |
 | `mc` | `mc(text)` | `mc('(What now?)')` - the player's own voice |
 
 Text types out; a click / Space / Enter completes the line, the next
-click advances. "Text speed" and "Fast-forward seen text" are in Settings.
+click advances. Reading controls:
+
+| key / gesture | does |
+|---------------|------|
+| wheel up, `PageUp`, ↶ button | roll back one line (50-line buffer) |
+| `L`, ▤ button | open the backlog / history overlay |
+| `Ctrl` (hold) or `Tab` (toggle) | skip - fast-forwards, stops at every choice |
+| `A` | auto-advance |
 
 ### Flow
 
@@ -138,18 +165,22 @@ click advances. "Text speed" and "Fast-forward seen text" are in Settings.
 | `choice` | `choice(options)` | see below |
 
 `set` with a **number** adds to the current value (starts at 0); any
-other value is assigned. `iff`'s function receives the state object -
-read `s.vars.*` and `s.player.*`.
+other value is assigned. To assign a number outright, wrap it in `abs()`:
+`set({ gold: abs(0) })` sets `gold` to 0 rather than adding 0. `iff`'s
+function receives the state object - read `s.vars.*` and `s.player.*`.
 
 ```js
 choice([
   { text: 'Say yes', to: 'yes_branch', set: { warmth: 1 } },
-  { text: 'Say no',  to: 'no_branch' }
+  { text: 'Say no',  to: 'no_branch' },
+  { text: 'Hug them', to: 'hug', show: function (s) { return s.vars.warmth > 2; } }
 ])
 ```
 
-Each option: `text` (supports tokens), optional `to` (label), optional
-`set`. Choices are also selectable with number keys `1`-`9`.
+Each option: `text` (supports tokens + markup), optional `to` (label),
+optional `set`, optional `show` (a `s => bool` - the option is hidden
+when it returns false). Visible options are renumbered; number keys
+`1`-`9` select them.
 
 ### Audio
 
@@ -201,13 +232,22 @@ code: `VNAudio.duck(amount, ms)`.
 - **Checkpoints** lists every checkpoint (newest first); picking one
   overwrites current progress. A checkpoint is written on every `saveOp`,
   every `chapterEnd`, and from the 💾 button on the in-game top bar.
-- A checkpoint stores: instruction pointer, `vars`, player name, the
-  "seen" set (for fast-forward), and the stage (background + who is
+- A checkpoint stores: position as **(nearest label, offset)** plus a hash
+  of the script, `vars`, player name, and the stage (background + who is
   shown where). Up to 30 are kept; oldest non-chapter-end ones are
   dropped first.
+- **Editing the script doesn't silently break saves.** Position is
+  anchored to the nearest label, so inserting lines inside one scene
+  doesn't move saves in later scenes. If the script hash no longer
+  matches, load shows a *"Save may be out of date"* prompt - resume
+  anyway, restart the chapter, or go back to the title.
+- "Seen" (for fast-forward / skip) is global read-tracking, stored once
+  under `vnengine_seen` - not copied into every checkpoint.
 - Everything lives in `localStorage` under `vnengine_save`,
-  `vnengine_checkpoints`, `vnengine_settings`, `vnengine_audio`.
-  **Erase save** on the title screen clears them.
+  `vnengine_checkpoints`, `vnengine_seen`, `vnengine_settings`,
+  `vnengine_audio`. If a write fails (quota full) the engine says so
+  instead of failing silently. **Erase save** on the title screen clears
+  them.
 
 ---
 
@@ -219,6 +259,8 @@ code: `VNAudio.duck(amount, ms)`.
 | Music volume / Sound volume / Mute | audio levels (persist immediately) |
 | Screen effects | gate for `fx('shake')` / `fx('flash')` |
 | Fast-forward seen text | already-seen lines appear instantly |
+| Auto-advance delay | pause between lines in auto mode (`A`) |
+| Skip unseen text too | let `Ctrl`/`Tab` skip race through unread lines, not just seen ones |
 
 ---
 
@@ -227,11 +269,13 @@ code: `VNAudio.duck(amount, ms)`.
 - **Colours / fonts:** the `:root` custom properties at the top of
   `css/style.css` (`--pink-*` accent ramp, `--ink*`, `--box-*`,
   `--font-*`). Change them there to reskin everything.
-- **Port:** `DEFAULT_PORT` in `playtest.py`, or pass one as an argument.
+- **Fonts:** bundled woff2 in `src/fonts/`, `@font-face`d at the top of
+  `css/style.css`. Swap the files (and the `--font-*` stacks) to change them.
+- **Port:** `DEFAULT_PORT` in `playtest.py`, or pass one as an argument;
+  either way it scans forward for the first free port.
 - **`file://` vs server:** identical except audio decoding is more
   reliable over the server; the engine falls back to a plain `<audio>`
   element on `file://`.
-- **Cache:** bump `?v=` in `index.html` after edits.
 
 ---
 

@@ -21,11 +21,29 @@
   var el = {};
   ['titleMenu', 'btnContinue', 'btnCheckpoints', 'firstName', 'lastName', 'nameError', 'nameConfirm',
    'bgA', 'bgB', 'sprites', 'dialogueBox', 'nameBox', 'dialogueText', 'advanceArrow',
-   'choices', 'btnSave', 'btnSettings', 'btnQuit',
+   'choices', 'btnSave', 'btnBacklog', 'btnRollback', 'btnSettings', 'btnQuit',
+   'autoBadge', 'skipBadge',
    'endTitle', 'endContinue', 'settingsOverlay', 'setSpeed', 'setEffects', 'setSkipSeen',
-   'setMusicVol', 'setSfxVol', 'setMute',
-   'checkpointsOverlay', 'cpList', 'cpClose', 'settingsClose'
+   'setAutoDelay', 'setSkipUnseen', 'setMusicVol', 'setSfxVol', 'setMute',
+   'checkpointsOverlay', 'cpList', 'cpClose', 'settingsClose',
+   'backlogOverlay', 'backlogList', 'backlogClose',
+   'compatOverlay', 'compatText', 'compatResume', 'compatRestart', 'compatTitle'
   ].forEach(function (id) { el[id] = document.getElementById(id); });
+
+  // Critical nodes: if any are missing the engine can't run - say so clearly
+  // instead of throwing an opaque TypeError halfway through setup. (The README
+  // invites editing index.html, so a deleted id is a plausible mistake.)
+  var CRITICAL = ['titleMenu', 'nameConfirm', 'firstName', 'lastName', 'nameError',
+                  'bgA', 'bgB', 'sprites', 'nameBox', 'dialogueText', 'advanceArrow',
+                  'choices', 'btnSave', 'btnSettings', 'btnQuit', 'endTitle', 'endContinue',
+                  'settingsOverlay', 'setSpeed', 'setEffects', 'setSkipSeen',
+                  'settingsClose', 'btnContinue'];
+  var missing = CRITICAL.filter(function (id) { return !el[id]; });
+  if (missing.length) {
+    console.error('VNengine: index.html is missing required element id(s): ' +
+                  missing.join(', ') + '. The engine will not start.');
+    return;
+  }
 
   var screens = {};
   [].forEach.call(document.querySelectorAll('.screen'), function (s) {
@@ -38,13 +56,70 @@
     current.screen = name;
   }
 
+  /* ---------- localStorage ---------- */
+  var SAVE_KEY = 'vnengine_save', SET_KEY = 'vnengine_settings',
+      CP_KEY = 'vnengine_checkpoints', SEEN_KEY = 'vnengine_seen';
+  var CP_CAP = 30;
+  var storageWarned = false;
+  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
+  function lsSet(k, v) {
+    try { localStorage.setItem(k, JSON.stringify(v)); return true; }
+    catch (e) {
+      if (!storageWarned) {
+        storageWarned = true;
+        console.error('VNengine: localStorage write failed (' + (e && e.name || 'error') +
+                      ') - saves are not persisting.');
+        try { toast('Save failed - browser storage is full'); } catch (_) {}
+      }
+      return false;
+    }
+  }
+  function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+  function clone(o) { try { return JSON.parse(JSON.stringify(o || {})); } catch (e) { return {}; } }
+
+  /* ---------- read-tracking ("seen") - global, its own key ----------
+     "Have I read this line" is not per-save state, so it lives under one
+     key instead of being cloned into every checkpoint (which used to blow
+     the quota on a long novel).  Keyed by label+offset so inserting a line
+     in one scene doesn't shift the keys for every scene after it. */
+  var seenStore = lsGet(SEEN_KEY) || {};
+  var seenDirty = false, seenTimer = null;
+  function markSeen(key) {
+    var was = !!seenStore[key];
+    if (!was) {
+      seenStore[key] = 1;
+      seenDirty = true;
+      if (!seenTimer) seenTimer = setTimeout(flushSeen, 1000);
+    }
+    return was;
+  }
+  function flushSeen() {
+    seenTimer = null;
+    if (seenDirty) { seenDirty = false; lsSet(SEEN_KEY, seenStore); }
+  }
+  window.addEventListener('beforeunload', flushSeen);
+
+  var settings = { speed: 55, effects: true, skipSeen: false,
+                   autoDelay: 1500, skipUnseen: false };
+  (function loadSettings() {
+    var s = lsGet(SET_KEY);
+    if (s) {
+      if (typeof s.speed === 'number') settings.speed = s.speed;
+      if (typeof s.effects === 'boolean') settings.effects = s.effects;
+      if (typeof s.skipSeen === 'boolean') settings.skipSeen = s.skipSeen;
+      if (typeof s.autoDelay === 'number') settings.autoDelay = s.autoDelay;
+      if (typeof s.skipUnseen === 'boolean') settings.skipUnseen = s.skipUnseen;
+    }
+  })();
+  function saveSettings() { lsSet(SET_KEY, settings); }
+
   /* ---------- state ---------- */
   function freshState() {
     return {
       ptr: 0,
       vars: {},
       player: { first: '', last: '' },
-      seen: {},
+      seen: seenStore,
       stage: { bg: 'black', sprites: {} }
     };
   }
@@ -53,28 +128,100 @@
   var typing = false, typeTimer = null, fullHTML = '', waiter = null;
   var choicesOpen = false, overlayOpen = false;
 
-  /* ---------- labels ---------- */
+  /* ---------- labels + script hash + validation ---------- */
   var LABELS = {};
-  SC.ops.forEach(function (op, i) { if (op.op === 'label') LABELS[op.name] = i; });
-
-  /* ---------- localStorage ---------- */
-  var SAVE_KEY = 'vnengine_save', SET_KEY = 'vnengine_settings', CP_KEY = 'vnengine_checkpoints';
-  var CP_CAP = 30;
-  function lsGet(k) { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } }
-  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
-  function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
-  function clone(o) { try { return JSON.parse(JSON.stringify(o || {})); } catch (e) { return {}; } }
-
-  var settings = { speed: 55, effects: true, skipSeen: false };
-  (function loadSettings() {
-    var s = lsGet(SET_KEY);
-    if (s) {
-      if (typeof s.speed === 'number') settings.speed = s.speed;
-      if (typeof s.effects === 'boolean') settings.effects = s.effects;
-      if (typeof s.skipSeen === 'boolean') settings.skipSeen = s.skipSeen;
+  var labelDupes = {};
+  SC.ops.forEach(function (op, i) {
+    if (op.op === 'label') {
+      if (LABELS[op.name] != null) labelDupes[op.name] = true;
+      LABELS[op.name] = i;
     }
-  })();
-  function saveSettings() { lsSet(SET_KEY, settings); }
+  });
+
+  // A cheap structural digest of the script.  Stamped into every save so a
+  // load can tell whether the script has changed underneath it.  We can't
+  // JSON.stringify the ops directly - `if` conditions are functions - so we
+  // fold in the meaningful fields by hand, cond functions included.
+  function digestOps(ops) {
+    var out = [];
+    for (var i = 0; i < ops.length; i++) {
+      var o = ops[i], s = o.op || '?';
+      switch (o.op) {
+        case 'say':    s += '|' + (o.who || '') + '|' + (o.text || ''); break;
+        case 'label':  s += '|' + o.name; break;
+        case 'jump':   s += '|' + o.to; break;
+        case 'if':     s += '|' + o.to + '|' + String(o.cond); break;
+        case 'set':    s += '|' + safeJson(o.vars); break;
+        case 'scene':  s += '|' + o.bg; break;
+        case 'show':   s += '|' + o.who + '|' + (o.expr || '') + '|' + (o.pos || ''); break;
+        case 'hide':   s += '|' + o.who; break;
+        case 'fx':     s += '|' + o.effect + '|' + (o.color || ''); break;
+        case 'choice':
+          s += '|' + (o.options || []).map(function (x) {
+            return (x.text || '') + '>' + (x.to || '');
+          }).join(';');
+          break;
+        case 'chapterEnd': s += '|' + (o.title || '') + '|' + (o.next || ''); break;
+      }
+      out.push(s);
+    }
+    return out.join('\n');
+  }
+  function safeJson(v) { try { return JSON.stringify(v); } catch (e) { return ''; } }
+  function hashStr(str) {
+    var h = 5381;
+    for (var i = 0; i < str.length; i++) h = (((h << 5) + h) ^ str.charCodeAt(i)) >>> 0;
+    return h.toString(36);
+  }
+  var SCRIPT_HASH = hashStr(digestOps(SC.ops));
+
+  function validateScript() {
+    var errs = [], warns = [];
+    var synthSfx = (A && A.SFX_NAMES) || [];
+    var fileSfx = (D && D.SFX_FILES) || {};
+    var known = function (name) {
+      return synthSfx.indexOf(name) !== -1 || Object.prototype.hasOwnProperty.call(fileSfx, name);
+    };
+    Object.keys(labelDupes).forEach(function (nm) {
+      errs.push('duplicate label "' + nm + '" - only the last one is reachable');
+    });
+    var unreachableFrom = -1, unreachableFlagged = false;
+    SC.ops.forEach(function (o, i) {
+      var near = segmentNameAt(i);
+      var at = ' (op #' + i + (near ? ', near "' + near + '"' : '') + ')';
+      if ((o.op === 'jump' || o.op === 'if') && LABELS[o.to] == null)
+        errs.push('unknown ' + o.op + ' target "' + o.to + '"' + at);
+      if (o.op === 'choice') (o.options || []).forEach(function (opt) {
+        if (opt.to != null && LABELS[opt.to] == null)
+          errs.push('choice option -> unknown label "' + opt.to + '"' + at);
+      });
+      if ((o.op === 'say' || o.op === 'show') && o.who && o.who !== 'mc' &&
+          !(D.CHARACTERS && D.CHARACTERS[o.who]))
+        warns.push('character "' + o.who + '" is not in VNData.CHARACTERS' + at);
+      if (o.op === 'sfx' && o.name && !known(o.name))
+        warns.push('sfx "' + o.name + '" is neither a synth sound nor in VNData.SFX_FILES' + at);
+      if (o.op === 'scene' && o.bg && D.BACKGROUNDS && D.BACKGROUNDS[o.bg] === undefined)
+        warns.push('background "' + o.bg + '" is not in VNData.BACKGROUNDS (treated as a raw path)' + at);
+
+      if (unreachableFrom >= 0 && o.op !== 'label' && !unreachableFlagged) {
+        unreachableFlagged = true;
+        warns.push('unreachable code from op #' + i + ' - nothing jumps past the ' +
+                   SC.ops[unreachableFrom].op + ' at #' + unreachableFrom +
+                   ' (until the next label)');
+      }
+      if (o.op === 'label') { unreachableFrom = -1; unreachableFlagged = false; }
+      else if (o.op === 'jump' || o.op === 'chapterEnd' || o.op === 'toTitle') {
+        unreachableFrom = i; unreachableFlagged = false;
+      }
+    });
+
+    if (!errs.length && !warns.length) return;
+    var g = console.group ? console.group.bind(console) : console.log.bind(console);
+    g('VNengine - script check (' + errs.length + ' error(s), ' + warns.length + ' warning(s))');
+    errs.forEach(function (m) { console.error(m); });
+    warns.forEach(function (m) { console.warn(m); });
+    if (console.groupEnd) console.groupEnd();
+  }
 
   /* ---------- image preload ---------- */
   (D.PRELOAD || []).forEach(function (src) { var im = new Image(); im.src = src; });
@@ -107,43 +254,77 @@
   }
   function makePlaceholderSprite(ch, id) {
     var node = document.createElement('div');
-    node.className = 'sprite sprite--ph is-shown';
+    node.className = 'sprite sprite--ph';
     node.style.setProperty('--ph-color', ch.color || '#ffd9ec');
     node.innerHTML = '<span class="ph-name">' + (ch.name || id) + '</span>' +
                      '<span class="ph-note">no sprite</span>';
     return node;
   }
+  function makeSpriteImg(ch, id) {
+    var node = document.createElement('img');
+    node.className = 'sprite';
+    node.addEventListener('error', function () {
+      if (this.parentNode !== el.sprites) return;
+      var ph = makePlaceholderSprite(ch, id);
+      ph.setAttribute('data-pos', this.getAttribute('data-pos'));
+      ph.setAttribute('data-id', id);
+      ph.style.order = this.style.order;
+      ph.classList.add('is-shown');
+      el.sprites.replaceChild(ph, this);
+    });
+    return node;
+  }
+  // Diff the stage against the DOM by data-id instead of rebuilding it.
+  // Rebuilding restarted spriteBob on every expression change (visible jump)
+  // and killed the fade-in transition (sprites popped in).  Now we only
+  // create/remove what actually changed and swap `src` in place.
   function renderSprites() {
-    el.sprites.innerHTML = '';
-    Object.keys(state.stage.sprites).forEach(function (id) {
-      var s = state.stage.sprites[id];
+    var want = state.stage.sprites || {};
+    var have = {};
+    [].slice.call(el.sprites.children).forEach(function (n) {
+      var id = n.getAttribute('data-id');
+      if (id && !n.hasAttribute('data-leaving')) have[id] = n;
+    });
+
+    Object.keys(have).forEach(function (id) {
+      if (want[id] && D.CHARACTERS[id]) return;
+      var n = have[id];
+      n.setAttribute('data-leaving', '1');
+      n.classList.remove('is-shown');
+      var gone = function () { if (n.parentNode) n.parentNode.removeChild(n); };
+      n.addEventListener('transitionend', gone, { once: true });
+      setTimeout(gone, 450);
+    });
+
+    Object.keys(want).forEach(function (id) {
       var ch = D.CHARACTERS[id];
       if (!ch) return;
+      var s = want[id];
       var src = spriteSrc(ch, s.expr);
-      var node;
-      if (src) {
-        node = document.createElement('img');
-        node.className = 'sprite is-shown';
-        node.src = src;
-        node.addEventListener('error', function () {
-          if (this.parentNode !== el.sprites) return;
-          var ph = makePlaceholderSprite(ch, id);
-          ph.setAttribute('data-pos', this.getAttribute('data-pos'));
-          ph.setAttribute('data-id', id);
-          el.sprites.replaceChild(ph, this);
-        });
-      } else {
-        node = makePlaceholderSprite(ch, id);
+      var node = have[id];
+      var isImg = node && node.tagName === 'IMG';
+      // type flipped between real art and placeholder card -> replace
+      if (node && ((src && !isImg) || (!src && isImg))) {
+        if (node.parentNode) node.parentNode.removeChild(node);
+        node = null;
       }
-      node.setAttribute('data-pos', s.pos);
-      node.setAttribute('data-id', id);
-      el.sprites.appendChild(node);
+      var order = POS_ORDER[s.pos] != null ? POS_ORDER[s.pos] : 1;
+      if (!node) {
+        node = src ? makeSpriteImg(ch, id) : makePlaceholderSprite(ch, id);
+        if (src) node.setAttribute('src', src);
+        node.setAttribute('data-id', id);
+        node.setAttribute('data-pos', s.pos);
+        node.style.order = order;
+        el.sprites.appendChild(node);
+        void node.offsetWidth;              // reflow so the fade-in actually plays
+        node.classList.add('is-shown');
+      } else {
+        if (isImg && node.getAttribute('src') !== src) node.setAttribute('src', src);
+        node.setAttribute('data-pos', s.pos);
+        node.style.order = order;
+        node.classList.add('is-shown');
+      }
     });
-    [].slice.call(el.sprites.children)
-      .sort(function (a, b) {
-        return POS_ORDER[a.getAttribute('data-pos')] - POS_ORDER[b.getAttribute('data-pos')];
-      })
-      .forEach(function (n) { el.sprites.appendChild(n); });
   }
   function stageShow(id, expr, pos) {
     state.stage.sprites[id] = { expr: expr || 'idle', pos: pos || 'center' };
@@ -165,20 +346,57 @@
     renderSprites();
   }
 
+  /* ---------- name box tint ---------- */
+  function readableInk(hex) {
+    var m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex || '');
+    if (!m) return '#fff';
+    var h = m[1];
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return lum > 0.62 ? '#3a1e30' : '#fff';
+  }
+  function applyNameboxColor(ch, who) {
+    var bg = '', ink = '';
+    if (ch && ch.color) { bg = ch.color; ink = readableInk(ch.color); }
+    else if (who === 'mc') { bg = '#7a3d63'; ink = '#fff'; }
+    el.nameBox.style.background = bg;
+    el.nameBox.style.color = ink;
+  }
+
   /* ===========================================================
      TEXT
      =========================================================== */
+  // Substitution order matters for safety: resolve tokens into the raw
+  // string first, THEN html-escape the whole thing (so a player name or a
+  // var value can never inject markup), THEN turn the [b]/[i]/[c] shortcuts
+  // into real tags on the now-safe string.
   function fmt(t) {
     var first = state.player.first || 'Player';
     var last = state.player.last || '';
     t = String(t)
       .replace(/\{first\}/g, first)
       .replace(/\{last\}/g, last)
-      .replace(/\{name\}/g, (first + ' ' + last).trim());
+      .replace(/\{name\}/g, (first + ' ' + last).trim())
+      .replace(/\{(\w+)\}/g, function (m, k) {
+        var v = state.vars[k];
+        return (v === undefined || v === null) ? m : String(v);
+      });
     var div = document.createElement('div');
     div.textContent = t;
-    return div.innerHTML;
+    return applyMarkup(div.innerHTML);
   }
+  function applyMarkup(s) {
+    return s
+      .replace(/\[b\]([\s\S]*?)\[\/b\]/g, '<b>$1</b>')
+      .replace(/\[i\]([\s\S]*?)\[\/i\]/g, '<i>$1</i>')
+      .replace(/\[c=([#\w][\w#().,%\s-]{0,30})\]([\s\S]*?)\[\/c\]/g, function (m, col, inner) {
+        return /^#[0-9a-f]{3,8}$|^[a-z]+$/i.test(col.trim())
+          ? '<span style="color:' + col.trim() + '">' + inner + '</span>' : inner;
+      });
+  }
+  function stripTags(s) { var d = document.createElement('div'); d.innerHTML = s; return d.textContent || ''; }
+
   function speedToDelay() {
     return Math.max(2, Math.round(55 - (settings.speed / 100) * 51));
   }
@@ -225,15 +443,16 @@
   function applySet(vars) {
     Object.keys(vars || {}).forEach(function (k) {
       var v = vars[k];
-      if (typeof v === 'number') state.vars[k] = (state.vars[k] || 0) + v;
-      else state.vars[k] = v;
+      if (v && typeof v === 'object' && '__set' in v) state.vars[k] = v.__set;   // abs(): assign
+      else if (typeof v === 'number') state.vars[k] = (state.vars[k] || 0) + v;  // number: add
+      else state.vars[k] = v;                                                    // else: assign
     });
   }
   function asyncNext(ms) { setTimeout(step, ms); return 'async'; }
 
   function step() {
     while (true) {
-      if (state.ptr >= SC.ops.length) { toTitle(); return; }
+      if (state.ptr >= SC.ops.length) { theEnd(); return; }
       var c = SC.ops[state.ptr++];
       var r = exec(c);
       if (r === 'wait' || r === 'async') return;
@@ -243,8 +462,8 @@
   function exec(c) {
     switch (c.op) {
       case 'label':     return 'go';
-      case 'jump':      state.ptr = LABELS[c.to]; return 'go';
-      case 'if':        if (c.cond(state)) state.ptr = LABELS[c.to]; return 'go';
+      case 'jump':      return goToLabel(c.to);
+      case 'if':        return c.cond(state) ? goToLabel(c.to) : 'go';
       case 'set':       applySet(c.vars); return 'go';
       case 'scene':     setBg(c.bg); return asyncNext(280);
       case 'pause':     return asyncNext(c.ms || 300);
@@ -264,16 +483,30 @@
     }
     return 'go';
   }
+  // Guard label jumps the way pickChoice already does - a typo'd target used
+  // to set ptr to undefined and crash on the next op with a useless message.
+  function goToLabel(name) {
+    if (LABELS[name] == null) {
+      console.error('VNengine: jump to unknown label "' + name + '" (op #' + (state.ptr - 1) + ') - ignored.');
+      toast('Broken jump: ' + name);
+      return 'go';
+    }
+    state.ptr = LABELS[name];
+    return 'go';
+  }
 
   function doSay(c) {
+    cancelAuto();
     var here = state.ptr - 1;
+    var pos = posFromPtr(here);
+    var seenKey = pos.label + '#' + pos.offset;
     var who = c.who;
     var ch = who && D.CHARACTERS[who];
     var nm = '';
     if (who === 'mc') nm = state.player.first || 'Player';
     else if (ch) nm = ch.name;
     el.nameBox.textContent = nm;
-    el.nameBox.style.background = ch ? '' : (who === 'mc' ? '#7a3d63' : '');
+    applyNameboxColor(ch, who);
 
     if (ch && c.expr && state.stage.sprites[who]) {
       state.stage.sprites[who].expr = c.expr;
@@ -281,12 +514,24 @@
     }
     highlight(ch ? who : null);
 
+    pushHistory(here);
+    playVoice(c.voice);
+
     waiter = 'say';
-    var instant = !!(settings.skipSeen && state.seen[here]);
-    state.seen[here] = 1;
-    typeText(fmt(c.text), instant);
+    var display = fmt(c.text);
+    backlogAdd(nm, display);
+    var wasSeen = markSeen(seenKey);
+    lastInstant = !!((settings.skipSeen && wasSeen) ||
+                     (skipOn() && (wasSeen || settings.skipUnseen)));
+    typeText(display, lastInstant);
+    scheduleAuto();
   }
 
+  function visibleOptions(items) {
+    return (items || []).filter(function (o) {
+      return typeof o.show === 'function' ? !!o.show(state) : true;
+    });
+  }
   function renderChoiceButtons(items, onPick) {
     el.nameBox.textContent = '';
     el.dialogueText.innerHTML = '';
@@ -303,9 +548,19 @@
     sfx('choice');
   }
   function doChoice(c) {
+    cancelAuto();
+    pushHistory(state.ptr - 1);
+    var opts = visibleOptions(c.options);
+    if (!opts.length) {
+      console.warn('VNengine: choice at op #' + (state.ptr - 1) +
+                   ' has no visible options - skipping it.');
+      waiter = null;
+      step();
+      return;
+    }
     choicesOpen = true;
     waiter = null;
-    renderChoiceButtons(c.options, function (i) { pickChoice(c.options[i]); });
+    renderChoiceButtons(opts, function (i) { pickChoice(opts[i]); });
   }
   function pickChoice(o) {
     if (!choicesOpen) return;
@@ -317,19 +572,164 @@
     step();
   }
 
+  /* ---------- rollback / backlog ---------- */
+  var history = [], HIST_CAP = 50;
+  var backlog = [], BACKLOG_CAP = 200;
+  function pushHistory(ptrOfOp) {
+    history.push({
+      ptr: ptrOfOp,
+      vars: clone(state.vars),
+      player: clone(state.player),
+      stage: clone(state.stage)
+    });
+    if (history.length > HIST_CAP) history.shift();
+  }
+  function rollback() {
+    if (overlayOpen || choicesOpen || current.screen !== 'vn') return;
+    if (history.length < 2) return;
+    // history[last] is the line we're on, history[last-1] the one before it.
+    // Drop both; step() re-runs the target op and re-pushes its entry, so the
+    // buffer keeps its true depth and repeated rollbacks keep going back.
+    var h = history[history.length - 2];
+    history.length -= 2;
+    state.vars = clone(h.vars);
+    state.player = clone(h.player);
+    state.stage = h.stage ? clone(h.stage) : { bg: 'black', sprites: {} };
+    if (!state.stage.sprites) state.stage.sprites = {};
+    state.ptr = h.ptr;
+    cancelAuto();
+    clearInterval(typeTimer); typing = false;
+    waiter = null; choicesOpen = false; el.choices.hidden = true;
+    if (A && A.stopAllFiles) A.stopAllFiles(0.15);
+    restoreStage();
+    step();
+  }
+  function backlogAdd(name, html) {
+    backlog.push({ name: name, html: html });
+    if (backlog.length > BACKLOG_CAP) backlog.shift();
+  }
+  function renderBacklog() {
+    if (!el.backlogList) return;
+    el.backlogList.innerHTML = '';
+    if (!backlog.length) {
+      var em = document.createElement('li');
+      em.className = 'cp-empty';
+      em.textContent = 'Nothing yet.';
+      el.backlogList.appendChild(em);
+      return;
+    }
+    backlog.forEach(function (row) {
+      var li = document.createElement('li');
+      li.className = 'bl-row';
+      if (row.name) {
+        var nm = document.createElement('span');
+        nm.className = 'bl-name';
+        nm.textContent = row.name;
+        li.appendChild(nm);
+      }
+      var tx = document.createElement('span');
+      tx.className = 'bl-text';
+      tx.innerHTML = row.html;            // already escaped + whitelisted by fmt()
+      li.appendChild(tx);
+      el.backlogList.appendChild(li);
+    });
+    el.backlogList.scrollTop = el.backlogList.scrollHeight;
+  }
+  function openBacklog() {
+    if (!el.backlogOverlay) return;
+    overlayOpen = true;
+    cancelAuto();
+    renderBacklog();
+    el.backlogOverlay.hidden = false;
+  }
+  function closeBacklog() {
+    overlayOpen = false;
+    if (el.backlogOverlay) el.backlogOverlay.hidden = true;
+  }
+
+  /* ---------- skip / auto-advance ---------- */
+  var autoActive = false, skipActive = false, skipHold = false;
+  var autoTimer = null, skipTimer = null, lastInstant = false;
+  function skipOn() { return skipActive || skipHold; }
+  function updateBadges() {
+    if (el.autoBadge) el.autoBadge.hidden = !autoActive;
+    if (el.skipBadge) el.skipBadge.hidden = !skipOn();
+  }
+  function cancelAuto() {
+    if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+    if (skipTimer) { clearTimeout(skipTimer); skipTimer = null; }
+  }
+  function scheduleAuto() {
+    cancelAuto();
+    if (current.screen !== 'vn' || waiter !== 'say') return;
+    if (skipOn() && lastInstant) {
+      skipTimer = setTimeout(function () {
+        if (skipOn() && waiter === 'say' && !choicesOpen && !overlayOpen) { waiter = null; step(); }
+      }, 45);
+      return;
+    }
+    if (autoActive) {
+      var kick = function () {
+        if (typing) { autoTimer = setTimeout(kick, 120); return; }
+        var wait = (settings.autoDelay || 1500) + Math.min(2200, (fullHTML || '').length * 26);
+        autoTimer = setTimeout(function () {
+          if (autoActive && waiter === 'say' && !choicesOpen && !overlayOpen) { waiter = null; step(); }
+        }, wait);
+      };
+      kick();
+    }
+  }
+  function toggleAuto() {
+    autoActive = !autoActive;
+    if (autoActive) skipActive = false;
+    updateBadges();
+    scheduleAuto();
+  }
+  function toggleSkip() {
+    skipActive = !skipActive;
+    if (skipActive) autoActive = false;
+    updateBadges();
+    if (waiter === 'say') { lastInstant = true; scheduleAuto(); }
+  }
+  function setSkipHold(on) {
+    if (skipHold === on) return;
+    skipHold = on;
+    updateBadges();
+    if (on && waiter === 'say') { lastInstant = true; scheduleAuto(); }
+    else if (!on && !skipActive) cancelAuto();
+  }
+  function stopModes() {
+    autoActive = skipActive = skipHold = false;
+    cancelAuto();
+    updateBadges();
+  }
+
+  /* ---------- voice ---------- */
+  var curVoice = null;
+  function playVoice(name) {
+    if (!A || !A.playFile) return;
+    if (curVoice && A.stopFile) A.stopFile(curVoice, 0.1);
+    curVoice = null;
+    if (name) { curVoice = name; A.playFile(name); }
+  }
+  function stopVoice() {
+    if (A && A.stopFile && curVoice) A.stopFile(curVoice, 0.15);
+    curVoice = null;
+  }
+
   /* ---------- chapter end ---------- */
   function doChapterEnd(c) {
     if (A && A.stopAllFiles) A.stopAllFiles(0.3);
     if (A && A.crushMusic) A.crushMusic(false);
+    curVoice = null;
     document.body.classList.remove('fx-shake');
+    stopModes();
     var here = state.ptr - 1;
-    // checkpoint that resumes at the start of the next chapter (or here, if none)
     var nextPtr = (c.next != null && LABELS[c.next] != null) ? LABELS[c.next] : here;
     state.ptr = nextPtr;
     pushCheckpoint(fmt(c.title || 'End of chapter'), { isChapterEnd: true });
     state.ptr = here;
-    lsSet(SAVE_KEY, { v: 1, ptr: here, vars: clone(state.vars), player: clone(state.player),
-                      seen: clone(state.seen), stage: clone(state.stage) });
+    lsSet(SAVE_KEY, makeSaveRecord(here));
     refreshContinue();
     el.endTitle.textContent = fmt(c.title || 'End of chapter');
     showScreen('end');
@@ -337,6 +737,7 @@
     el.endContinue.onclick = function () {
       if (c.next != null && LABELS[c.next] != null) {
         state.ptr = LABELS[c.next];
+        history = []; backlog = [];
         showScreen('vn');
         restoreStage();
         step();
@@ -344,6 +745,15 @@
         toTitle();
       }
     };
+  }
+
+  function theEnd() {
+    stopModes();
+    if (A && A.stopAllFiles) A.stopAllFiles(0.3);
+    curVoice = null;
+    el.endTitle.textContent = 'The End';
+    showScreen('end');
+    el.endContinue.onclick = function () { toTitle(); };
   }
 
   /* ===========================================================
@@ -367,8 +777,13 @@
     } else if (e === 'flash') {
       var d = document.createElement('div');
       d.className = 'fx-flash fx-flash--' + (c.color || 'white');
+      if (c.ms) d.style.animationDuration = c.ms + 'ms';
       document.getElementById('game').appendChild(d);
-      setTimeout(function () { d.remove(); }, c.ms || 260);
+      // Remove on the animation's own end so the fade always completes,
+      // instead of yanking the node at a fixed 260ms mid-fade.
+      var done = function () { if (d.parentNode) d.parentNode.removeChild(d); };
+      d.addEventListener('animationend', done, { once: true });
+      setTimeout(done, (c.ms || 900) + 400);   // safety net
     }
   }
 
@@ -387,19 +802,38 @@
     });
     return best || '';
   }
+  // Position as (nearest preceding label, ops since that label) instead of a
+  // raw op index, so inserting a line in one scene doesn't shove every save
+  // in every later scene onto the wrong line.
+  function posFromPtr(ptr) {
+    var label = segmentNameAt(ptr);
+    var base = (label && LABELS[label] != null) ? LABELS[label] : 0;
+    return { label: label, offset: ptr - base };
+  }
+  function resolvePos(pos) {
+    if (!pos) return 0;
+    if (pos.label && LABELS[pos.label] != null)
+      return Math.max(0, Math.min(LABELS[pos.label] + (pos.offset || 0), SC.ops.length));
+    if (typeof pos.ptr === 'number') return Math.max(0, Math.min(pos.ptr, SC.ops.length));
+    return 0;
+  }
+  function makeSaveRecord(ptr) {
+    return {
+      v: 2, hash: SCRIPT_HASH, pos: posFromPtr(ptr),
+      vars: clone(state.vars), player: clone(state.player), stage: clone(state.stage)
+    };
+  }
   function pushCheckpoint(label, opts) {
     opts = opts || {};
     var ptr = (opts.ptr != null) ? opts.ptr : state.ptr;
+    var rec = makeSaveRecord(ptr);
     var cp = {
       id: 'cp' + Date.now().toString(36) + '_' + ((Math.random() * 1e6) | 0).toString(36),
       label: label || segmentNameAt(ptr) || 'Autosave',
       isChapterEnd: !!opts.isChapterEnd,
       ts: Date.now(),
-      ptr: ptr,
-      vars: clone(state.vars),
-      player: clone(state.player),
-      seen: clone(state.seen),
-      stage: clone(state.stage)
+      v: 2, hash: rec.hash, pos: rec.pos,
+      vars: rec.vars, player: rec.player, stage: rec.stage
     };
     var list = readCheckpoints();
     list.push(cp);
@@ -409,19 +843,40 @@
       if (idx < 0) break;
       list.splice(idx, 1);
     }
-    lsSet(CP_KEY, list);
-    lsSet(SAVE_KEY, { v: 1, ptr: cp.ptr, vars: cp.vars, player: cp.player, seen: cp.seen, stage: cp.stage });
+    var okList = lsSet(CP_KEY, list);
+    var okSave = lsSet(SAVE_KEY, rec);
     refreshContinue();
+    cp._ok = okList && okSave;
     return cp;
   }
+
+  var pendingCompat = null;
   function applySnapshot(s) {
     state = freshState();
-    state.ptr = s.ptr || 0;
     state.vars = s.vars || {};
     state.player = s.player || { first: '', last: '' };
-    state.seen = s.seen || {};
     state.stage = s.stage || { bg: 'black', sprites: {} };
     if (!state.stage.sprites) state.stage.sprites = {};
+
+    var mismatch = false, canRestartChapter = true;
+    if (s.v === 2) {
+      if (s.hash !== SCRIPT_HASH) mismatch = true;
+      if (!s.pos || (s.pos.label && LABELS[s.pos.label] == null)) {
+        mismatch = true;
+        canRestartChapter = !!(s.pos && s.pos.label && LABELS[s.pos.label] != null);
+      }
+      state.ptr = resolvePos(s.pos);
+    } else {
+      // legacy v1 save - no hash to compare, raw index, warn to be safe
+      mismatch = true;
+      canRestartChapter = false;
+      state.ptr = (typeof s.ptr === 'number') ? Math.max(0, Math.min(s.ptr, SC.ops.length)) : 0;
+    }
+    pendingCompat = mismatch
+      ? { label: (s.pos && s.pos.label) || '', canRestartChapter: canRestartChapter }
+      : null;
+    history = []; backlog = [];
+    return true;
   }
   function loadSave() {
     var s = lsGet(SAVE_KEY);
@@ -432,13 +887,35 @@
   function loadCheckpoint(cp) {
     if (!cp) return false;
     applySnapshot(cp);
-    lsSet(SAVE_KEY, { v: 1, ptr: cp.ptr, vars: cp.vars, player: cp.player, seen: cp.seen, stage: cp.stage });
+    lsSet(SAVE_KEY, makeSaveRecord(state.ptr));
     refreshContinue();
     return true;
   }
   function refreshContinue() {
     el.btnContinue.disabled = !lsGet(SAVE_KEY);
     if (el.btnCheckpoints) el.btnCheckpoints.disabled = !readCheckpoints().length;
+  }
+  // Called after any save-load path.  If the script changed under the save,
+  // ask the player what to do instead of silently resuming into garbage.
+  function resumeAfterLoad() {
+    showScreen('vn');
+    restoreStage();
+    if (pendingCompat) { openCompat(pendingCompat); pendingCompat = null; }
+    else step();
+  }
+  function openCompat(info) {
+    overlayOpen = true;
+    if (el.compatText) {
+      el.compatText.textContent = 'This save was made with a different version of the script. ' +
+        'Resuming may land you in the wrong place.';
+    }
+    if (el.compatRestart) el.compatRestart.hidden = !info.canRestartChapter;
+    el._compatInfo = info;
+    if (el.compatOverlay) el.compatOverlay.hidden = false;
+  }
+  function closeCompat() {
+    overlayOpen = false;
+    if (el.compatOverlay) el.compatOverlay.hidden = true;
   }
 
   /* ---------- toast ---------- */
@@ -452,11 +929,11 @@
     setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 2200);
   }
   function manualCheckpoint() {
-    pushCheckpoint('Manual - ' + (segmentNameAt(state.ptr) || 'save'));
+    var cp = pushCheckpoint('Manual - ' + (segmentNameAt(state.ptr) || 'save'));
     var prev = el.btnSave.textContent;
-    el.btnSave.textContent = '✓';
+    el.btnSave.textContent = cp._ok ? '✓' : '✕';
     setTimeout(function () { el.btnSave.textContent = prev; }, 800);
-    toast('Checkpoint saved');
+    toast(cp._ok ? 'Checkpoint saved' : 'Save failed - storage full');
   }
 
   /* ---------- checkpoints overlay ---------- */
@@ -496,9 +973,7 @@
         sfx('confirm');
         closeCheckpoints();
         loadCheckpoint(cp);
-        showScreen('vn');
-        restoreStage();
-        step();
+        resumeAfterLoad();
       });
       el.cpList.appendChild(li);
     });
@@ -517,9 +992,12 @@
   /* ---------- settings ---------- */
   function openSettings() {
     overlayOpen = true;
+    cancelAuto();
     el.setSpeed.value = settings.speed;
     el.setEffects.checked = settings.effects;
     el.setSkipSeen.checked = settings.skipSeen;
+    if (el.setAutoDelay) el.setAutoDelay.value = settings.autoDelay;
+    if (el.setSkipUnseen) el.setSkipUnseen.checked = settings.skipUnseen;
     if (A) {
       var as = A.getSettings();
       el.setMusicVol.value = Math.round(as.music * 100);
@@ -532,6 +1010,8 @@
     settings.speed = parseInt(el.setSpeed.value, 10) || 55;
     settings.effects = el.setEffects.checked;
     settings.skipSeen = el.setSkipSeen.checked;
+    if (el.setAutoDelay) settings.autoDelay = parseInt(el.setAutoDelay.value, 10) || 1500;
+    if (el.setSkipUnseen) settings.skipUnseen = el.setSkipUnseen.checked;
     saveSettings();
     overlayOpen = false;
     el.settingsOverlay.hidden = true;
@@ -548,10 +1028,13 @@
   function toTitle() {
     waiter = null; choicesOpen = false;
     clearInterval(typeTimer); typing = false;
+    stopModes();
+    stopVoice();
     if (A && A.stopAllFiles) A.stopAllFiles(0.2);
     if (A && A.crushMusic) A.crushMusic(false);
     document.body.classList.remove('fx-shake');
     el.choices.hidden = true;
+    history = []; backlog = [];
     showScreen('title');
     refreshContinue();
   }
@@ -570,6 +1053,7 @@
     state = freshState();
     state.player.first = f;
     state.player.last = l;
+    history = []; backlog = [];
     showScreen('vn');
     restoreStage();
     state.ptr = 0;
@@ -577,9 +1061,7 @@
   }
   function doContinue() {
     if (!loadSave()) { refreshContinue(); return; }
-    showScreen('vn');
-    restoreStage();
-    step();
+    resumeAfterLoad();
   }
   function wipeSave() {
     if (!lsGet(SAVE_KEY) && !readCheckpoints().length) return;
@@ -597,16 +1079,23 @@
     if (current.screen !== 'vn') return;
     if (choicesOpen) return;
     if (typing) { finishTyping(); return; }
-    if (waiter === 'say') { waiter = null; step(); }
+    if (waiter === 'say') { cancelAuto(); waiter = null; step(); }
   }
   screens.vn.addEventListener('click', function (e) {
     if (e.target.closest('.vn-topbar') || e.target.closest('.choices')) return;
     advance();
   });
+  screens.vn.addEventListener('wheel', function (e) {
+    if (overlayOpen || choicesOpen) return;
+    if (e.deltaY < 0) { e.preventDefault(); rollback(); }
+  }, { passive: false });
+
   document.addEventListener('keydown', function (e) {
     if (overlayOpen) {
       if (e.key === 'Escape') {
-        if (el.checkpointsOverlay && !el.checkpointsOverlay.hidden) closeCheckpoints();
+        if (el.compatOverlay && !el.compatOverlay.hidden) { /* force a choice */ }
+        else if (el.backlogOverlay && !el.backlogOverlay.hidden) closeBacklog();
+        else if (el.checkpointsOverlay && !el.checkpointsOverlay.hidden) closeCheckpoints();
         else closeSettings();
       }
       return;
@@ -615,16 +1104,31 @@
       if (e.key === 'Enter') confirmName();
       return;
     }
-    if (current.screen === 'vn') {
-      if (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter') {
-        e.preventDefault();
-        advance();
-      } else if (choicesOpen && /^[1-9]$/.test(e.key)) {
-        var btn = el.choices.children[parseInt(e.key, 10) - 1];
-        if (btn) btn.click();
-      }
+    if (current.screen !== 'vn') return;
+
+    if (e.key === 'Control') { setSkipHold(true); return; }
+    if (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter') {
+      e.preventDefault();
+      advance();
+    } else if (e.key === 'PageUp') {
+      e.preventDefault();
+      rollback();
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      toggleSkip();
+    } else if (e.key === 'a' || e.key === 'A') {
+      toggleAuto();
+    } else if (e.key === 'l' || e.key === 'L') {
+      openBacklog();
+    } else if (choicesOpen && /^[1-9]$/.test(e.key)) {
+      var btn = el.choices.children[parseInt(e.key, 10) - 1];
+      if (btn) btn.click();
     }
   });
+  document.addEventListener('keyup', function (e) {
+    if (e.key === 'Control') setSkipHold(false);
+  });
+  window.addEventListener('blur', function () { setSkipHold(false); });
 
   el.titleMenu.addEventListener('click', function (e) {
     var b = e.target.closest('button');
@@ -640,6 +1144,9 @@
   });
   el.nameConfirm.addEventListener('click', function () { sfx('confirm'); confirmName(); });
   el.btnSave.addEventListener('click', function () { sfx('click'); manualCheckpoint(); });
+  if (el.btnRollback) el.btnRollback.addEventListener('click', function () { sfx('click'); rollback(); });
+  if (el.btnBacklog) el.btnBacklog.addEventListener('click', function () { sfx('click'); openBacklog(); });
+  if (el.backlogClose) el.backlogClose.addEventListener('click', function () { sfx('click'); closeBacklog(); });
   if (el.cpClose) el.cpClose.addEventListener('click', function () { sfx('click'); closeCheckpoints(); });
   el.btnSettings.addEventListener('click', function () { sfx('click'); openSettings(); });
   el.btnQuit.addEventListener('click', function () {
@@ -649,6 +1156,20 @@
   });
   el.settingsClose.addEventListener('click', function () { sfx('click'); closeSettings(); });
   el.endContinue.addEventListener('click', function () { sfx('confirm'); });
+
+  if (el.compatResume) el.compatResume.addEventListener('click', function () {
+    sfx('click'); closeCompat(); step();
+  });
+  if (el.compatRestart) el.compatRestart.addEventListener('click', function () {
+    sfx('click');
+    var info = el._compatInfo;
+    closeCompat();
+    if (info && info.label && LABELS[info.label] != null) { state.ptr = LABELS[info.label]; }
+    step();
+  });
+  if (el.compatTitle) el.compatTitle.addEventListener('click', function () {
+    sfx('back'); closeCompat(); toTitle();
+  });
 
   /* ---------- audio unlock on first gesture + title music ---------- */
   function firstGesture() {
@@ -664,6 +1185,8 @@
   document.addEventListener('keydown', firstGesture, true);
 
   /* ---------- start ---------- */
+  validateScript();
+  updateBadges();
   showScreen('title');
   refreshContinue();
 })();

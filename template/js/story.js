@@ -8,13 +8,17 @@
    Everything under `var ops = [...]` is an EXAMPLE. Replace it
    with your own story. See VNengine.md for the full op reference.
 
-   Text tokens:  {first}  {last}  {name}  -> the player's name.
+   Text tokens:  {first} {last} {name}  -> the player's name
+                 {anyVar}             -> a value from set({ ... })
+   Text markup:  [b]bold[/b]  [i]italic[/i]  [c=#ff8ec4]colour[/c]
    =========================================================== */
 (function (global) {
   'use strict';
 
   /* ---- op builders -------------------------------------------------- */
-  function say(who, text, expr) { return { op: 'say', who: who, text: text, expr: expr }; }
+  // say(who, text, expr, voice) - `voice` is an optional SfxBank file name
+  // (register it in VNData.SFX_FILES) played while the line is on screen.
+  function say(who, text, expr, voice) { return { op: 'say', who: who, text: text, expr: expr, voice: voice }; }
   function narr(text)           { return { op: 'say', who: null, text: text }; }   // narration
   function mc(text)             { return { op: 'say', who: 'mc', text: text }; }    // player's own voice
   function bg(name)             { return { op: 'scene', bg: name }; }
@@ -24,6 +28,10 @@
   function jump(to)             { return { op: 'jump', to: to }; }
   function iff(cond, to)        { return { op: 'if', cond: cond, to: to }; }
   function set(vars)            { return { op: 'set', vars: vars }; }
+  function abs(n)               { return { __set: n }; }   // set({ gold: abs(0) }) assigns instead of adding
+  // choice([ { text, to, set, show } ]) - `show` is an optional s => bool;
+  // an option whose show() returns false is hidden.  e.g.
+  //   { text: 'Ask about the ring', to: 'ring', show: function (s) { return s.vars.warmth > 2; } }
   function choice(options)      { return { op: 'choice', options: options }; }
   function music(name, opts)    { return { op: 'music', name: name, opts: opts || {} }; }
   function stopMusic(opts)      { return { op: 'stopMusic', opts: opts || {} }; }
@@ -54,6 +62,9 @@
 
     mc('(Two people, one question already.)'),
 
+    set({ coins: 3 }),
+    narr('You have [b]{coins}[/b] coins in your pocket - [i]{name}[/i]-level wealth.'),
+
     say('ari', 'Quick one: are we friends?', 'talk'),
     choice([
       { text: 'Of course we are', to: 'friendly', set: { warmth: 1 } },
@@ -78,6 +89,17 @@
     say('ari', 'Lo-fi now. This is the one audio effect kept as an example.', 'idle'),
     fx('crushmusic', { on: false }),
     say('ari', 'Back to normal.', 'talk'),
+
+    say('ari', 'One last thing, {first}.', 'talk'),
+    choice([
+      { text: 'Ask what it is', to: 'finish_common' },
+      // this option only appears if you picked "Of course we are" earlier
+      { text: 'Hug goodbye', to: 'end_warm',
+        show: function (s) { return s.vars.warmth > 0; } },
+      // abs() assigns instead of adding - here it zeroes the coins
+      { text: 'Hand Ari your coins', to: 'finish_common', set: { coins: abs(0) } }
+    ]),
+    label('finish_common'),
 
     iff(function (s) { return s.vars.warmth > 0; }, 'end_warm'),
     narr('You kept your distance. Ari waves and heads off.'),

@@ -5,6 +5,26 @@
    box. Change them here to reskin the whole engine.
    =========================================================== */
 
+/* ---------- fonts (bundled - no network, no Google) ---------- */
+@font-face{font-family:'Comfortaa';font-weight:400;font-display:swap;
+  src:url('../src/fonts/comfortaa-400.woff2') format('woff2')}
+@font-face{font-family:'Comfortaa';font-weight:600;font-display:swap;
+  src:url('../src/fonts/comfortaa-600.woff2') format('woff2')}
+@font-face{font-family:'Comfortaa';font-weight:700;font-display:swap;
+  src:url('../src/fonts/comfortaa-700.woff2') format('woff2')}
+@font-face{font-family:'Nunito';font-weight:400;font-style:normal;font-display:swap;
+  src:url('../src/fonts/nunito-400.woff2') format('woff2')}
+@font-face{font-family:'Nunito';font-weight:700;font-style:normal;font-display:swap;
+  src:url('../src/fonts/nunito-700.woff2') format('woff2')}
+@font-face{font-family:'Nunito';font-weight:800;font-style:normal;font-display:swap;
+  src:url('../src/fonts/nunito-800.woff2') format('woff2')}
+@font-face{font-family:'Nunito';font-weight:400;font-style:italic;font-display:swap;
+  src:url('../src/fonts/nunito-400-italic.woff2') format('woff2')}
+@font-face{font-family:'Caveat';font-weight:500;font-display:swap;
+  src:url('../src/fonts/caveat-500.woff2') format('woff2')}
+@font-face{font-family:'Caveat';font-weight:700;font-display:swap;
+  src:url('../src/fonts/caveat-700.woff2') format('woff2')}
+
 :root{
   --pink-0:#fff0f7;
   --pink-1:#ffe0ef;
@@ -338,6 +358,18 @@ body{
   border-color:var(--pink-4);
 }
 
+/* ---------- mode badges (auto / skip) ---------- */
+.vn-modes{
+  position:absolute;top:1rem;left:1.2rem;z-index:9;
+  display:flex;gap:.4rem;pointer-events:none;
+}
+.vn-mode{
+  font-family:var(--font-ui);font-weight:700;font-size:.72rem;letter-spacing:.14em;
+  color:#fff;background:rgba(84,20,52,.72);border:1px solid var(--pink-4);
+  padding:.28rem .7rem;border-radius:999px;
+}
+.vn-mode[hidden]{display:none}
+
 /* ---------- vn topbar ---------- */
 .vn-topbar{
   position:absolute;top:1rem;right:1.2rem;z-index:9;
@@ -410,6 +442,20 @@ body{
 .cp-label{font-family:var(--font-ui);font-weight:700;font-size:.98rem;color:var(--ink)}
 .cp-meta{font-family:var(--font-body);font-size:.8rem;color:var(--pink-4);opacity:.85}
 .cp-empty{font-family:var(--font-body);font-size:.9rem;color:var(--ink);opacity:.6;padding:.6rem 0}
+
+/* ---- backlog / history ---- */
+.bl-list{max-height:56vh}
+.bl-row{
+  display:flex;flex-direction:column;gap:.15rem;
+  padding:.5rem .7rem;
+  background:#fff;border:2px solid var(--pink-1);border-radius:10px;
+}
+.bl-name{font-family:var(--font-ui);font-weight:700;font-size:.82rem;color:var(--pink-4)}
+.bl-text{font-family:var(--font-body);font-size:.92rem;color:var(--ink);line-height:1.45;white-space:pre-wrap}
+
+/* stack the script-changed overlay's buttons with a little breathing room */
+#compatOverlay .overlay-card button + button{margin-top:.5rem}
+#compatRestart[hidden]{display:none}
 
 /* ---- toast ---- */
 .vn-toast{

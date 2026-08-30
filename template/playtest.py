@@ -3,8 +3,8 @@
 VNengine - playtest / runtime server.
 
 Usage:
-    python playtest.py            # port 8000; opens http://localhost:8000/index.html
-    python playtest.py 5500       # custom port
+    python playtest.py            # first free port from 8000 up; opens a browser tab
+    python playtest.py 5500       # prefer this port (falls forward if it's taken)
 
 Two modes, picked automatically:
 
@@ -171,20 +171,37 @@ ARCHIVE = _load_archive(ARCHIVE_PATH) if ARCHIVE_PATH else None
 
 
 class DevHandler(SimpleHTTPRequestHandler):
-    """Plain static server rooted at BASE (unchanged behaviour)."""
+    """Plain static server rooted at BASE.
+
+    Dev mode = you are editing these files; the browser must never keep a
+    stale copy.  Sending ``no-store`` here is what makes the old ``?v=``
+    query-string trick unnecessary."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=BASE, **kwargs)
+
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
 
     def log_message(self, fmt, *args):
         pass  # keep the console quiet
 
 
 class ArchiveHandler(SimpleHTTPRequestHandler):
-    """Serve index.html from disk, css/js/src from the in-memory archive."""
+    """Serve index.html from disk, css/js/src from the in-memory archive.
+
+    A packaged game's archived files never change for a given build, so they
+    get a long immutable cache; only index.html is served ``no-store``."""
 
     def __init__(self, *args, **kwargs):
+        self._cache = None
         super().__init__(*args, directory=BASE, **kwargs)
+
+    def end_headers(self):
+        if self._cache:
+            self.send_header("Cache-Control", self._cache)
+        super().end_headers()
 
     def log_message(self, fmt, *args):
         pass
@@ -198,6 +215,7 @@ class ArchiveHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         rel = self._rel_path()
         if rel == "index.html":
+            self._cache = "no-store"
             return super().do_GET()  # from disk, next to the exe
         data = ARCHIVE.get(rel)
         if data is None:
@@ -208,6 +226,7 @@ class ArchiveHandler(SimpleHTTPRequestHandler):
     def do_HEAD(self):
         rel = self._rel_path()
         if rel == "index.html":
+            self._cache = "no-store"
             return super().do_HEAD()
         data = ARCHIVE.get(rel)
         if data is None:
@@ -241,10 +260,10 @@ class ArchiveHandler(SimpleHTTPRequestHandler):
         else:
             self.send_response(200)
 
+        self._cache = "public, max-age=31536000, immutable"
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(end - start + 1))
         self.send_header("Accept-Ranges", "bytes")
-        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         if body:
             self.wfile.write(data[start:end + 1])
@@ -253,13 +272,21 @@ class ArchiveHandler(SimpleHTTPRequestHandler):
 Handler = ArchiveHandler if ARCHIVE is not None else DevHandler
 
 
-def _port_busy(port):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s.settimeout(0.25)
-        return s.connect_ex(("127.0.0.1", port)) == 0
-    finally:
-        s.close()
+def _find_free_port(start, tries=100):
+    """First bindable port at or above ``start`` on localhost, or None.
+
+    A shipped game must not assume port 8000 is 'us' - on a busy dev machine
+    it's just as likely to be someone else's server. Scan for a free one."""
+    for p in range(start, start + tries):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind(("127.0.0.1", p))
+            return p
+        except OSError:
+            continue
+        finally:
+            s.close()
+    return None
 
 
 def _open_browser(url, delay=1.0):
@@ -269,27 +296,37 @@ def _open_browser(url, delay=1.0):
 
 
 def main():
-    port = DEFAULT_PORT
+    requested = None
     if len(sys.argv) > 1:
         try:
-            port = int(sys.argv[1])
+            requested = int(sys.argv[1])
         except ValueError:
             pass
 
-    url = "http://localhost:%d/index.html" % port
     mode = ("archive  " + os.path.basename(ARCHIVE_PATH)
             if ARCHIVE is not None else "dev mode")
-
     header("VNengine", "playtest server  .  " + mode)
 
-    # Already running (launched twice): just open a tab.
-    if _port_busy(port):
-        _open_browser(url, delay=0.2)
-        ok("already running - reopened " + cyan(url))
-        outro("done")
-        return
+    start = requested or DEFAULT_PORT
+    httpd = None
+    for _ in range(3):                       # scan, then retry if we lost a race
+        port = _find_free_port(start)
+        if port is None:
+            bar("no free port near %d" % start)
+            sys.exit(1)
+        try:
+            httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+            break
+        except OSError:
+            start = port + 1
+    if httpd is None:
+        bar("could not bind a port")
+        sys.exit(1)
 
-    httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    if requested and port != requested:
+        note("port %d was busy - using %d" % (requested, port))
+
+    url = "http://localhost:%d/index.html" % port
     ok("serving  " + cyan(url))
     note("Ctrl+C to stop")
     _open_browser(url)

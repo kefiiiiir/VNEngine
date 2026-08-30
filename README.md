@@ -20,13 +20,16 @@ choice([
 ]),
 ```
 
-Features: typewriter text with tokens (`{first}`/`{last}`/`{name}`), background
-crossfades, expression sprites with graceful placeholder fallback, branching
-(`label`/`jump`/`if`/`choice`) and variables, a synthesized sound-effect
-palette plus music with crossfade/duck/lo-fi, screen shake & flash, an
-auto-save + named checkpoints system, a settings overlay, and a name-entry
-screen — all in `localStorage`, all reskinnable from the CSS variables at the
-top of `css/style.css`.
+Features: typewriter text with tokens (`{first}`/`{last}`/`{name}`/`{anyVar}`)
+and `[b]`/`[i]`/`[c=…]` markup, background crossfades, diffed expression
+sprites with graceful placeholder fallback, branching
+(`label`/`jump`/`if`/`choice`, including conditional options) and variables,
+a synthesized sound-effect palette plus music with crossfade/duck/lo-fi,
+screen shake & flash, rollback + a backlog overlay, skip and auto-advance,
+voice lines, an auto-save + named checkpoints system that survives script
+edits, a boot-time script validator, a settings overlay, and a name-entry
+screen — all in `localStorage`, bundled fonts (no CDN), all reskinnable from
+the CSS variables at the top of `css/style.css`.
 
 ---
 

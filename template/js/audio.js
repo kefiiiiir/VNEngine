@@ -122,6 +122,8 @@ window.VNAudio = (function () {
     theme: 'src/audio/music/theme.mp3'
   };
   // Optional named time marks inside tracks (seconds), for music(name,{offset}).
+  //   MARKS = { theme: { chorus: 42, bridge: 88 } }
+  //   music('theme', { offset: 'chorus' })   -> starts at 42s
   var MARKS = {};
 
   var SET_KEY = 'vnengine_audio';
@@ -270,7 +272,9 @@ window.VNAudio = (function () {
     }
     cur = entry;
 
-    var startAt = Math.max(0, opts.offset || 0);
+    var off = opts.offset || 0;
+    if (typeof off === 'string') off = (MARKS[name] && MARKS[name][off]) || 0;
+    var startAt = Math.max(0, off);
     var fadeIn = opts.fadeIn != null ? opts.fadeIn : fade;
     var begin = function () {
       if (entry._started || cur !== entry) return;
@@ -546,6 +550,7 @@ window.VNAudio = (function () {
     setMuted: setMuted,
     getSettings: getSettings,
     MUSIC: MUSIC,
-    MARKS: MARKS
+    MARKS: MARKS,
+    SFX_NAMES: Object.keys(SFX)          // synth sound names, for script validation
   };
 })();
