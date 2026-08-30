@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VNengine - demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@400;600;700&family=Nunito:ital,wght@0,400;0,700;0,800;1,400&family=Caveat:wght@500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css?v=1">
+</head>
+<body>
+<div id="game">
+
+  <!-- ================= TITLE ================= -->
+  <section class="screen screen--title" data-screen="title">
+    <div class="title-bg"></div>
+    <div class="title-inner">
+      <h1 class="logo">
+        <span class="logo-a">VN</span>
+        <span class="logo-b">engine</span>
+        <span class="logo-sub">a code-first visual novel engine</span>
+      </h1>
+      <nav class="menu" id="titleMenu">
+        <button data-action="new">New game</button>
+        <button data-action="continue" id="btnContinue" disabled>Continue</button>
+        <button data-action="checkpoints" id="btnCheckpoints" disabled>Checkpoints</button>
+        <button data-action="settings">Settings</button>
+        <button data-action="wipe" class="menu-danger">Erase save</button>
+      </nav>
+      <p class="title-credit">edit <code>js/story.js</code> and <code>js/data.js</code> to build your own &middot; see <code>VNengine.md</code></p>
+    </div>
+  </section>
+
+  <!-- ================= NAME ENTRY ================= -->
+  <section class="screen screen--name" data-screen="name">
+    <div class="name-card">
+      <h2>Your name</h2>
+      <p class="name-hint">Used in the script through the <code>{first}</code> / <code>{last}</code> / <code>{name}</code> tokens.</p>
+      <label>First name
+        <input type="text" id="firstName" maxlength="24" autocomplete="off" placeholder="e.g. Alex">
+      </label>
+      <label>Last name
+        <input type="text" id="lastName" maxlength="28" autocomplete="off" placeholder="e.g. Carter">
+      </label>
+      <p class="name-error" id="nameError"></p>
+      <button id="nameConfirm">Start &rarr;</button>
+    </div>
+  </section>
+
+  <!-- ================= VISUAL NOVEL STAGE ================= -->
+  <section class="screen screen--vn" data-screen="vn">
+    <div class="stage">
+      <div class="bg-layer" id="bgA"></div>
+      <div class="bg-layer" id="bgB"></div>
+      <div class="sprites" id="sprites"></div>
+      <div class="stage-vignette"></div>
+    </div>
+
+    <div class="dialogue" id="dialogueBox">
+      <div class="namebox" id="nameBox"></div>
+      <div class="textbox">
+        <p class="text" id="dialogueText"></p>
+        <span class="advance-arrow" id="advanceArrow">▼</span>
+      </div>
+    </div>
+
+    <div class="choices" id="choices" hidden></div>
+
+    <div class="vn-topbar">
+      <button id="btnSave" title="Save checkpoint">💾</button>
+      <button id="btnSettings" title="Settings">⚙</button>
+      <button id="btnQuit" title="To menu">✕</button>
+    </div>
+  </section>
+
+  <!-- ================= CHAPTER END ================= -->
+  <section class="screen screen--end" data-screen="end">
+    <div class="end-inner">
+      <p class="end-kicker">End of chapter</p>
+      <h2 id="endTitle">Chapter 1</h2>
+      <button id="endContinue">Next</button>
+    </div>
+  </section>
+
+  <!-- ================= SETTINGS OVERLAY ================= -->
+  <div class="overlay" id="settingsOverlay" hidden>
+    <div class="overlay-card">
+      <h2>Settings</h2>
+      <label>Text speed
+        <input type="range" id="setSpeed" min="0" max="100" value="55">
+      </label>
+      <label>Music volume
+        <input type="range" id="setMusicVol" min="0" max="100" value="65">
+      </label>
+      <label>Sound volume
+        <input type="range" id="setSfxVol" min="0" max="100" value="80">
+      </label>
+      <label class="row">
+        <input type="checkbox" id="setMute"> Mute
+      </label>
+      <label class="row">
+        <input type="checkbox" id="setEffects" checked> Screen effects
+      </label>
+      <label class="row">
+        <input type="checkbox" id="setSkipSeen"> Fast-forward seen text
+      </label>
+      <button id="settingsClose">Close</button>
+    </div>
+  </div>
+
+  <!-- ================= CHECKPOINTS OVERLAY ================= -->
+  <div class="overlay" id="checkpointsOverlay" hidden>
+    <div class="overlay-card overlay-card--wide">
+      <h2>Checkpoints</h2>
+      <p class="cp-hint">Points you can jump back to. Selecting one overwrites current progress.</p>
+      <ul class="cp-list" id="cpList"></ul>
+      <button id="cpClose">Close</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ?v=N - bump when you change a file so the browser drops its cache -->
+<script src="js/audio.js?v=1"></script>
+<script src="js/data.js?v=1"></script>
+<script src="js/story.js?v=1"></script>
+<script src="js/engine.js?v=1"></script>
+</body>
+</html>
