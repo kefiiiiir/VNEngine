@@ -145,14 +145,15 @@ The speaking character is auto-highlighted; the rest dim.
 | `mc` | `mc(text)` | `mc('(What now?)')` - the player's own voice |
 
 Text types out; a click / Space / Enter completes the line, the next
-click advances. Reading controls:
+click advances. The in-game top bar has the reading controls (buttons
+only - no key bindings to collide with anything):
 
-| key / gesture | does |
-|---------------|------|
-| wheel up, `PageUp`, ↶ button | roll back one line (50-line buffer) |
-| `L`, ▤ button | open the backlog / history overlay |
-| `Ctrl` (hold) or `Tab` (toggle) | skip - fast-forwards, stops at every choice |
-| `A` | auto-advance |
+| button | does |
+|--------|------|
+| ↶ | roll back one line (50-line buffer) |
+| ▤ | open the backlog / history overlay |
+| ⏩ | skip - fast-forwards, stops at every choice (toggle) |
+| ▶ | auto-advance (toggle) |
 
 ### Flow
 

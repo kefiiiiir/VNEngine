@@ -21,7 +21,7 @@
   var el = {};
   ['titleMenu', 'btnContinue', 'btnCheckpoints', 'firstName', 'lastName', 'nameError', 'nameConfirm',
    'bgA', 'bgB', 'sprites', 'dialogueBox', 'nameBox', 'dialogueText', 'advanceArrow',
-   'choices', 'btnSave', 'btnBacklog', 'btnRollback', 'btnSettings', 'btnQuit',
+   'choices', 'btnSave', 'btnBacklog', 'btnRollback', 'btnSkip', 'btnAuto', 'btnSettings', 'btnQuit',
    'autoBadge', 'skipBadge',
    'endTitle', 'endContinue', 'settingsOverlay', 'setSpeed', 'setEffects', 'setSkipSeen',
    'setAutoDelay', 'setSkipUnseen', 'setMusicVol', 'setSfxVol', 'setMute',
@@ -647,13 +647,15 @@
     if (el.backlogOverlay) el.backlogOverlay.hidden = true;
   }
 
-  /* ---------- skip / auto-advance ---------- */
-  var autoActive = false, skipActive = false, skipHold = false;
+  /* ---------- skip / auto-advance (top-bar buttons only) ---------- */
+  var autoActive = false, skipActive = false;
   var autoTimer = null, skipTimer = null, lastInstant = false;
-  function skipOn() { return skipActive || skipHold; }
+  function skipOn() { return skipActive; }
   function updateBadges() {
     if (el.autoBadge) el.autoBadge.hidden = !autoActive;
-    if (el.skipBadge) el.skipBadge.hidden = !skipOn();
+    if (el.skipBadge) el.skipBadge.hidden = !skipActive;
+    if (el.btnAuto) el.btnAuto.classList.toggle('is-on', autoActive);
+    if (el.btnSkip) el.btnSkip.classList.toggle('is-on', skipActive);
   }
   function cancelAuto() {
     if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
@@ -691,15 +693,8 @@
     updateBadges();
     if (waiter === 'say') { lastInstant = true; scheduleAuto(); }
   }
-  function setSkipHold(on) {
-    if (skipHold === on) return;
-    skipHold = on;
-    updateBadges();
-    if (on && waiter === 'say') { lastInstant = true; scheduleAuto(); }
-    else if (!on && !skipActive) cancelAuto();
-  }
   function stopModes() {
-    autoActive = skipActive = skipHold = false;
+    autoActive = skipActive = false;
     cancelAuto();
     updateBadges();
   }
@@ -1085,11 +1080,9 @@
     if (e.target.closest('.vn-topbar') || e.target.closest('.choices')) return;
     advance();
   });
-  screens.vn.addEventListener('wheel', function (e) {
-    if (overlayOpen || choicesOpen) return;
-    if (e.deltaY < 0) { e.preventDefault(); rollback(); }
-  }, { passive: false });
 
+  // Keyboard: advance the line, pick a numbered choice, close an overlay.
+  // Rollback / backlog / skip / auto are top-bar buttons only.
   document.addEventListener('keydown', function (e) {
     if (overlayOpen) {
       if (e.key === 'Escape') {
@@ -1106,29 +1099,14 @@
     }
     if (current.screen !== 'vn') return;
 
-    if (e.key === 'Control') { setSkipHold(true); return; }
     if (e.code === 'Space' || e.code === 'Enter' || e.code === 'NumpadEnter') {
       e.preventDefault();
       advance();
-    } else if (e.key === 'PageUp') {
-      e.preventDefault();
-      rollback();
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      toggleSkip();
-    } else if (e.key === 'a' || e.key === 'A') {
-      toggleAuto();
-    } else if (e.key === 'l' || e.key === 'L') {
-      openBacklog();
     } else if (choicesOpen && /^[1-9]$/.test(e.key)) {
       var btn = el.choices.children[parseInt(e.key, 10) - 1];
       if (btn) btn.click();
     }
   });
-  document.addEventListener('keyup', function (e) {
-    if (e.key === 'Control') setSkipHold(false);
-  });
-  window.addEventListener('blur', function () { setSkipHold(false); });
 
   el.titleMenu.addEventListener('click', function (e) {
     var b = e.target.closest('button');
@@ -1146,6 +1124,8 @@
   el.btnSave.addEventListener('click', function () { sfx('click'); manualCheckpoint(); });
   if (el.btnRollback) el.btnRollback.addEventListener('click', function () { sfx('click'); rollback(); });
   if (el.btnBacklog) el.btnBacklog.addEventListener('click', function () { sfx('click'); openBacklog(); });
+  if (el.btnSkip) el.btnSkip.addEventListener('click', function () { sfx('click'); toggleSkip(); });
+  if (el.btnAuto) el.btnAuto.addEventListener('click', function () { sfx('click'); toggleAuto(); });
   if (el.backlogClose) el.backlogClose.addEventListener('click', function () { sfx('click'); closeBacklog(); });
   if (el.cpClose) el.cpClose.addEventListener('click', function () { sfx('click'); closeCheckpoints(); });
   el.btnSettings.addEventListener('click', function () { sfx('click'); openSettings(); });

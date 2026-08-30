@@ -384,6 +384,7 @@ body{
   transition:background .12s ease, transform .12s ease;
 }
 .vn-topbar button:hover{background:var(--pink-4);transform:translateY(-2px)}
+.vn-topbar button.is-on{background:var(--pink-4);box-shadow:0 0 0 2px var(--box-border)}
 
 /* ==========================================================
    CHAPTER END
