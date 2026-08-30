@@ -38,6 +38,99 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_PORT = 8000
 
+
+# --------------------------------------------------------------------------- #
+#  tiny terminal UI - pure stdlib, safe to freeze, degrades to plain text     #
+# --------------------------------------------------------------------------- #
+
+try:                                    # box glyphs need a utf-8 stream
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
+
+def _enable_vt():
+    """Turn on ANSI escape handling on the Windows console. No-op elsewhere."""
+    if os.name != "nt":
+        return True
+    try:
+        import ctypes
+        k = ctypes.windll.kernel32
+        touched = False
+        for h in (-11, -12):            # STD_OUTPUT_HANDLE, STD_ERROR_HANDLE
+            handle = k.GetStdHandle(h)
+            if not handle or handle == -1:
+                continue
+            mode = ctypes.c_ulong()
+            if not k.GetConsoleMode(handle, ctypes.byref(mode)):
+                continue
+            k.SetConsoleMode(handle, mode.value | 0x0004)
+            touched = True
+        return touched
+    except Exception:
+        return False
+
+
+def _colors_ok():
+    if os.environ.get("NO_COLOR") or os.environ.get("VNENGINE_PLAIN"):
+        return False
+    if not getattr(sys.stdout, "isatty", lambda: False)():
+        return False
+    return _enable_vt()
+
+
+COLOR = _colors_ok()
+UTF = "utf" in (getattr(sys.stdout, "encoding", "") or "").lower()
+
+G = {"tl": "┌", "bl": "└", "bar": "│", "tick": "✔", "dot": "•"} if UTF else \
+    {"tl": "+", "bl": "+", "bar": "|", "tick": "OK", "dot": "-"}
+
+
+def _sgr(s, code):
+    return s if not COLOR else "\033[%sm%s\033[0m" % (code, s)
+
+
+def bold(s):  return _sgr(s, "1")
+def dim(s):   return _sgr(s, "2")
+def cyan(s):  return _sgr(s, "38;5;44")
+def green(s): return _sgr(s, "38;5;42")
+
+
+def grad(s, a=(0x33, 0xC8, 0xFF), b=(0x8B, 0x5C, 0xF6)):
+    if not COLOR:
+        return s
+    n = max(len(s) - 1, 1)
+    out = []
+    for i, ch in enumerate(s):
+        r = round(a[0] + (b[0] - a[0]) * i / n)
+        g = round(a[1] + (b[1] - a[1]) * i / n)
+        bl = round(a[2] + (b[2] - a[2]) * i / n)
+        out.append("\033[38;2;%d;%d;%dm%s" % (r, g, bl, ch))
+    return "".join(out) + "\033[0m"
+
+
+def bar(s=""):
+    print(("%s  %s" % (dim(G["bar"]), s)) if s else dim(G["bar"]), flush=True)
+
+
+def header(title, subtitle=""):
+    print(flush=True)
+    print("%s  %s" % (dim(G["tl"]), bold(grad(" " + title + " "))), flush=True)
+    if subtitle:
+        bar(dim(subtitle))
+    bar()
+
+
+def ok(s):   bar("%s  %s" % (green(G["tick"]), s))
+def note(s): bar("%s  %s" % (dim(G["dot"]), dim(s)))
+
+
+def outro(title):
+    bar()
+    print("%s  %s" % (dim(G["bl"]), green(title)), flush=True)
+    print(flush=True)
+
 # Where "next to me" is: the folder of the .exe when frozen (PyInstaller),
 # otherwise the folder of this script.
 if getattr(sys, "frozen", False):
@@ -184,24 +277,32 @@ def main():
             pass
 
     url = "http://localhost:%d/index.html" % port
-    mode = "archive (%s)" % os.path.basename(ARCHIVE_PATH) if ARCHIVE is not None else "dev"
+    mode = ("archive  " + os.path.basename(ARCHIVE_PATH)
+            if ARCHIVE is not None else "dev mode")
+
+    header("VNengine", "playtest server  .  " + mode)
 
     # Already running (launched twice): just open a tab.
     if _port_busy(port):
         _open_browser(url, delay=0.2)
-        print("VNengine - server already running, opened %s" % url)
+        ok("already running - reopened " + cyan(url))
+        outro("done")
         return
 
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    print("VNengine - playtest server [%s]" % mode, flush=True)
-    print("  %s" % url, flush=True)
-    print("  Ctrl+C to stop", flush=True)
+    ok("serving  " + cyan(url))
+    note("Ctrl+C to stop")
     _open_browser(url)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("stopped")
         httpd.server_close()
+        outro("stopped")
+
+
+# --------------------------------------------------------------------------- #
+#  you can add any server code here if you need to
+# --------------------------------------------------------------------------- #
 
 
 if __name__ == "__main__":
