@@ -30,42 +30,37 @@ top of `css/style.css`.
 
 ---
 
-## Quick start
+## Get started
 
-You need **Python 3** and a modern browser. Nothing else.
+**Download — the normal way.** Grab `setup.exe` from the
+[Releases](../../releases) page and run it. Nothing to install.
 
-### 1. Create a project
+**From source.** This repo is plain Python, open source. Same thing:
 
 ```bash
 python setup.py
 ```
 
-Answer a few prompts (name, title, author, where to put it). This copies the
-engine into `<destination>/<ProjectName>/` — your own project folder, ready to
-edit, like a fresh Unity or Unreal project.
+Either way, you answer a few prompts (name, title, author, where to put it) and
+get a **project folder** — your own copy of the engine, ready to edit, like a
+fresh Unity or Unreal project.
 
-### 2. Play it while you build
-
-```bash
-cd <destination>/<ProjectName>
-python playtest.py            # opens http://localhost:8000/index.html
-```
-
-`playtest.py` is a minimal local server — it just serves the folder so the
-browser stops complaining about `file://`. Edit `js/story.js` and `js/data.js`,
-refresh, repeat. (You can also just double-click `index.html`; the server only
-makes audio decoding a little more reliable.)
-
-### 3. Build a distributable
-
-From the project folder:
+### Play it while you build
 
 ```bash
-python tools/projectpackager-windows.py
+cd <YourProject>
+playtest            # or:  python playtest.py   — opens http://localhost:8000
 ```
 
-Pick console- or window-based, pick `.pak` or `.zip`, pick an output folder.
-You get:
+`playtest` runs a minimal local server so the browser stops complaining about
+`file://`. Edit `js/story.js` and `js/data.js`, refresh, repeat. (You can also
+just double-click `index.html`; the server only makes audio decoding a little
+more reliable.)
+
+### Ship a distributable
+
+From the project folder, run the packager — `projectpackager-windows.exe`, in
+`tools/`:
 
 ```
 <output>/<Project>/
@@ -75,8 +70,8 @@ You get:
 ```
 
 Anyone double-clicks `<Project>.exe`: it starts the local runtime, reads the
-assets straight out of the `.pak`, and opens the game in their browser. No
-Python, no install, nothing to set up on their side.
+assets straight out of the `.pak`, and opens the game in their browser. Nothing
+to install on their side.
 
 ---
 
@@ -90,7 +85,7 @@ js/story.js       your script           -> window.VNScript  (EDIT THIS)
 js/audio.js       music + sound engine  -> window.VNAudio   (reusable as-is)
 js/engine.js      the runtime           (usually left alone)
 src/              your images and audio
-tools/            the packager (step 3)
+tools/            the packager
 VNengine.md       the full manual — every op, with examples
 ```
 
@@ -100,15 +95,19 @@ with copy-paste examples.
 
 ---
 
-## Repo layout
+## This repo
+
+Open source. The repo holds the engine and its tooling in **Python + JS
+source form**; the [Releases](../../releases) page publishes the compiled
+`.exe` builds (`setup.exe`, and the packager that ships inside each project).
 
 ```
-setup.py       scaffold a new project (step 1)
+setup.py       scaffold a new project            (published as setup.exe)
 template/      the engine — copied wholesale into every new project
   index.html  playtest.py  VNengine.md
   css/  js/  src/
-  tools/projectpackager-windows.py
+  tools/projectpackager-windows.py               (published as .exe, in-project)
 ```
 
-`template/` is the source of truth for the engine; you never run it in place,
-you `setup.py` a copy and work in that.
+`template/` is the source of truth for the engine; you never run it in place —
+`setup` a copy and work in that.

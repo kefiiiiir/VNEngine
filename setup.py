@@ -11,8 +11,9 @@ the engine template into  <destination>/<ProjectName>/  ready to run with
 ``python playtest.py``.
 
 Later this file is meant to be frozen into a single setup.exe; the template is
-then bundled with PyInstaller ``--add-data`` and found via ``sys._MEIPASS``.
-The ``_template_dir()`` helper already handles both cases.
+The release keeps ``template/`` as a real folder next to ``setup.exe`` (so it
+stays visible and editable), so the frozen build just looks beside the .exe.
+``_template_dir()`` handles every layout.
 """
 
 import os
@@ -25,13 +26,26 @@ import datetime
 VALID_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$")
 
 
-def _template_dir():
-    """Folder holding the engine template, frozen or not."""
+def _template_candidates():
+    """Places 'template/' might be, most-preferred first."""
+    bases = []
     if getattr(sys, "frozen", False):
-        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        # setup.exe: template/ ships as a real folder beside the .exe ...
+        bases.append(os.path.dirname(os.path.abspath(sys.executable)))
+        # ... or, if a build bundles it in with --add-data, under _MEIPASS.
+        if getattr(sys, "_MEIPASS", None):
+            bases.append(sys._MEIPASS)
     else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, "template")
+        # running straight from the repo
+        bases.append(os.path.dirname(os.path.abspath(__file__)))
+    return [os.path.join(b, "template") for b in bases]
+
+
+def _template_dir():
+    for path in _template_candidates():
+        if os.path.isdir(path):
+            return path
+    return None
 
 
 def ask(prompt, default=""):
@@ -61,8 +75,10 @@ def patch_title(index_html, title):
 
 def main():
     template = _template_dir()
-    if not os.path.isdir(template):
-        sys.exit("error: template folder not found at %s" % template)
+    if template is None:
+        checked = "\n  ".join(_template_candidates())
+        sys.exit("error: 'template' folder not found. Put it next to setup.exe.\n"
+                 "checked:\n  %s" % checked)
 
     print("VNengine - new project\n")
 
