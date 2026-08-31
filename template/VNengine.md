@@ -1,12 +1,19 @@
 # VNengine
 
-A small, code-first visual novel engine. No build step, no framework, no
-dependencies - four plain JavaScript files, one stylesheet, one HTML page.
-You write your novel as a JavaScript array of "ops"; the engine plays it.
+A small, code-first visual novel engine. No build step, no framework - four
+plain JavaScript files, one stylesheet, one HTML page, and the engine itself
+pulls in nothing. You write your novel as a JavaScript array of "ops"; the
+engine plays it.
 
 Think of it as the runtime, not the game: like an engine rather than a
 finished title. The repository ships with a tiny demo so you can see every
 feature working; replace `js/story.js` and `js/data.js` with your own.
+
+It runs as a desktop app, not a hosted web page: `playtest.py` (and every
+packaged build) opens the game in its own native window backed by a tiny
+local server that stops when you close the window. The two Python packages
+that involves - `pywebview` (the window) and `pyinstaller` (packaging) -
+are the only dependencies, and `setup` offers to install them.
 
 ---
 
@@ -54,6 +61,9 @@ js/data.js        your assets manifest  -> window.VNData     (EDIT THIS)
 js/story.js       your script           -> window.VNScript   (EDIT THIS)
 js/engine.js      the runtime           (usually left alone)
 src/              your images and audio (see src/README.md)
+playtest.py       the local server + native-window launcher
+project.json      name / title / author  (setup writes it; titles the window)
+tools/            the packager - the "Build" step (see tools/README.md)
 ```
 
 Load order in `index.html` matters: `audio.js`, `data.js`, `story.js`,
@@ -259,6 +269,9 @@ code: `VNAudio.duck(amount, ms)`.
   anyway, restart the chapter, or go back to the title.
 - "Seen" (for fast-forward / skip) is global read-tracking, stored once
   under `vnengine_seen` - not copied into every checkpoint.
+- Destructive actions (jump to a checkpoint, return to menu, **Erase save**)
+  ask first with an in-engine modal styled like the rest of the game - not a
+  browser `confirm()` box. Escape or a click outside cancels.
 - Everything lives in `localStorage` under `vnengine_save`,
   `vnengine_checkpoints`, `vnengine_seen`, `vnengine_settings`,
   `vnengine_audio`. If a write fails (quota full) the engine says so
@@ -289,9 +302,17 @@ code: `VNAudio.duck(amount, ms)`.
   `css/style.css`. Swap the files (and the `--font-*` stacks) to change them.
 - **Port:** `DEFAULT_PORT` in `playtest.py`, or pass one as an argument;
   either way it scans forward for the first free port.
-- **`file://` vs server:** identical except audio decoding is more
-  reliable over the server; the engine falls back to a plain `<audio>`
-  element on `file://`.
+- **`file://` vs server:** double-clicking `index.html` runs the raw page in
+  whatever opened it - fine, and saves still work. `playtest.py` adds the
+  native window, the shut-down-on-close behaviour, more reliable audio
+  decoding (the engine falls back to a plain `<audio>` element on `file://`),
+  and the terminal diagnostics (§1).
+- **Packaging:** `tools/projectpackager-windows` freezes `playtest.py` into
+  `<Project>.exe` and packs `index.html` + `project.json` + `css/` + `js/` +
+  `src/` into `<Project>.pak` beside it. Two profiles - *development*
+  (console + diagnostics) and *shipping* (windowed) - see `tools/README.md`.
+- **Window title:** taken from `project.json` `"title"`, falling back to the
+  `<title>` in `index.html`.
 
 ---
 
