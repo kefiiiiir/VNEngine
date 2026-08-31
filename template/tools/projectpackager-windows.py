@@ -11,21 +11,30 @@ Produces a distributable folder:
 
     <output>/<Project>/
         <Project>.exe      the game runtime (playtest.py frozen)
-        index.html         copied as-is
-        <Project>.pak      css/ + js/ + src/, packed
+        <Project>.pak      index.html + project.json + css/ + js/ + src/, packed
 
-On the first run (or whenever ``playtest.py`` changed) it freezes the runtime
-via ``projectpackager-tools/build-runtime.py`` and caches it; after that it is
-just copy + zip. Nothing is prebuilt and shipped - the runtime always matches
-the current ``playtest.py``.
+index.html goes *into* the .pak now, not loose beside the .exe - a player
+has no plain file to tamper with.
+
+Two build profiles:
+
+    development   console window, live browser diagnostics   (--console)
+    shipping      windowed, no console                        (--windowed)
+
+On the first run of a profile (or whenever ``playtest.py`` changed) it
+freezes the runtime via ``projectpackager-tools/build-runtime.py`` and
+caches it per profile; after that it is just copy + zip. Nothing is
+prebuilt and shipped - the runtime always matches the current ``playtest.py``.
 
 Everything this tool needs lives under ``tools/``:
 
     tools/
       projectpackager-windows(.py/.exe)
+      devlog.js                  the dev-only console bridge (bundled into
+                                 a development build; never into shipping)
       projectpackager-tools/
-        build-runtime.py       does the freezing
-        cache/                 built runtime + a hash of playtest.py
+        build-runtime.py         does the freezing
+        cache/                   built runtimes (per profile) + playtest hashes
 """
 
 import os
@@ -492,8 +501,15 @@ def _self_dir():
 PP_TOOLS = os.path.join(_self_dir(), "projectpackager-tools")
 BUILD_RUNTIME = os.path.join(PP_TOOLS, "build-runtime.py")
 CACHE_DIR = os.path.join(PP_TOOLS, "cache")
-CACHED_EXE = os.path.join(CACHE_DIR, "runtime-windows.exe")
-CACHED_SIG = os.path.join(CACHE_DIR, "playtest.sha256")
+BUILT_EXE = os.path.join(CACHE_DIR, "runtime-windows.exe")   # build-runtime's output
+
+
+def _cache_slots(windowed):
+    """Per-profile cache: (exe, playtest-hash) so switching profile doesn't
+    force a rebuild of the other one."""
+    tag = "ship" if windowed else "dev"
+    return (os.path.join(CACHE_DIR, "runtime-windows-%s.exe" % tag),
+            os.path.join(CACHE_DIR, "playtest-%s.sha256" % tag))
 
 
 def project_name(project_dir):
@@ -564,21 +580,23 @@ def _sha256(path):
     return h.hexdigest()
 
 
-def ensure_runtime(project_dir, verbose=False):
+def ensure_runtime(project_dir, windowed, verbose=False):
     """Return a runtime .exe built from this project's playtest.py.
 
-    Cached under projectpackager-tools/cache/ and rebuilt only when
-    playtest.py changed. ``verbose`` streams PyInstaller's full log;
-    otherwise the build shows a single progress bar."""
+    Cached per profile under projectpackager-tools/cache/ and rebuilt only
+    when playtest.py changed. ``windowed`` picks the shipping profile
+    (--windowed); ``verbose`` streams PyInstaller's full log, otherwise the
+    build shows a single progress bar."""
     playtest = os.path.join(project_dir, "playtest.py")
     sig = _sha256(playtest)
+    cached_exe, cached_sig = _cache_slots(windowed)
 
-    if os.path.isfile(CACHED_EXE) and os.path.isfile(CACHED_SIG):
+    if os.path.isfile(cached_exe) and os.path.isfile(cached_sig):
         try:
-            with open(CACHED_SIG) as f:
+            with open(cached_sig) as f:
                 if f.read().strip() == sig:
                     ok("Runtime up to date  " + dim("(playtest.py unchanged)"))
-                    return CACHED_EXE
+                    return cached_exe
         except OSError:
             pass
 
@@ -591,12 +609,14 @@ def ensure_runtime(project_dir, verbose=False):
 
     os.makedirs(CACHE_DIR, exist_ok=True)
     cmd = [py, BUILD_RUNTIME, playtest, CACHE_DIR]
+    if windowed:
+        cmd.append("--windowed")
 
     if verbose:
         note("Freezing runtime from playtest.py  " + dim("(verbose log)"))
         bar()
         rc = subprocess.call(cmd)
-        if rc == 0 and os.path.isfile(CACHED_EXE):
+        if rc == 0 and os.path.isfile(BUILT_EXE):
             ok("Runtime built")
     else:
         note("Freezing runtime from playtest.py - first build can take a minute")
@@ -613,11 +633,16 @@ def ensure_runtime(project_dir, verbose=False):
             for ln in tail:
                 bar(dim(ln))
 
-    if rc != 0 or not os.path.isfile(CACHED_EXE):
+    if rc != 0 or not os.path.isfile(BUILT_EXE):
         die("runtime build failed")
-    with open(CACHED_SIG, "w") as f:
+    shutil.copy2(BUILT_EXE, cached_exe)
+    try:
+        os.remove(BUILT_EXE)            # keep only the per-profile slots
+    except OSError:
+        pass
+    with open(cached_sig, "w") as f:
         f.write(sig)
-    return CACHED_EXE
+    return cached_exe
 
 
 def build_archive(project_dir, archive_path):
@@ -630,6 +655,13 @@ def build_archive(project_dir, archive_path):
         for dirpath, _, names in os.walk(src):
             for fn in names:
                 files.append(os.path.join(dirpath, fn))
+
+    # index.html now lives inside the .pak; project.json rides along so the
+    # runtime can title its window from the project's real metadata.
+    for extra in ("index.html", "project.json"):
+        p = os.path.join(project_dir, extra)
+        if os.path.isfile(p):
+            files.append(p)
 
     total = len(files)
     with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -662,6 +694,12 @@ def main():
 
     ext = ask_choice("Archive format", [".pak", ".zip"], ".pak")
 
+    PROFILE_DEV = "development  - console window, live diagnostics"
+    PROFILE_SHIP = "shipping     - windowed, no console"
+    profile = ask_choice("Build profile", [PROFILE_DEV, PROFILE_SHIP],
+                         PROFILE_DEV)
+    windowed = profile == PROFILE_SHIP
+
     LOG_NORMAL = "normal   - one progress bar"
     LOG_VERBOSE = "verbose  - full build log"
     logmode = ask_choice("Build output", [LOG_NORMAL, LOG_VERBOSE], LOG_NORMAL)
@@ -677,18 +715,17 @@ def main():
         shutil.rmtree(out_dir)
     os.makedirs(out_dir, exist_ok=True)
 
-    runtime = ensure_runtime(project_dir, verbose=verbose)
+    runtime = ensure_runtime(project_dir, windowed, verbose=verbose)
 
-    with Spinner("Copying runtime and index.html"):
+    with Spinner("Copying runtime"):
         shutil.copy2(runtime, os.path.join(out_dir, safe + ".exe"))
-        shutil.copy2(os.path.join(project_dir, "index.html"),
-                     os.path.join(out_dir, "index.html"))
 
     note("Packing %s%s" % (safe, ext))
     n = build_archive(project_dir, os.path.join(out_dir, safe + ext))
     ok("Packed %d file%s into %s%s" % (n, "" if n == 1 else "s", safe, ext))
 
-    outro("Packaged  " + out_dir,
+    tag = "shipping" if windowed else "development"
+    outro("Packaged  " + out_dir + dim("   (%s)" % tag),
           ["%s  %s" % (dim(G["dot"]), fn) for fn in sorted(os.listdir(out_dir))])
 
     post_build_menu(out_dir)

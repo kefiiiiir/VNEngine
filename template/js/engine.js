@@ -923,6 +923,74 @@
     setTimeout(function () { t.classList.remove('is-in'); }, 1700);
     setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 2200);
   }
+
+  /* ---------- in-world confirm ----------
+     Replaces window.confirm() - a browser dialog reading "localhost says..."
+     shatters the mood. Same job, styled like the rest of the game, async via
+     a callback: askConfirm(opts, function (yes) { ... }).
+       opts.title / body            heading + line of explanation
+       opts.confirmText / cancelText button labels
+       opts.danger                  red confirm button, focus defaults to Cancel
+     Escape or a click on the backdrop counts as Cancel - never a dead end. */
+  function askConfirm(opts, onDone) {
+    opts = opts || {};
+    var wasOverlay = overlayOpen;
+    overlayOpen = true;
+
+    var ov = document.createElement('div');
+    ov.className = 'overlay vn-ask';
+    var card = document.createElement('div');
+    card.className = 'overlay-card';
+
+    if (opts.title) {
+      var h = document.createElement('h2');
+      h.textContent = opts.title;
+      card.appendChild(h);
+    }
+    var body = document.createElement('p');
+    body.className = 'cp-hint vn-ask-body';
+    body.textContent = opts.body || 'Are you sure?';
+    card.appendChild(body);
+
+    var row = document.createElement('div');
+    row.className = 'vn-ask-actions';
+    var cancel = document.createElement('button');
+    cancel.className = 'vn-ask-cancel';
+    cancel.textContent = opts.cancelText || 'Cancel';
+    var okBtn = document.createElement("button");
+    okBtn.textContent = opts.confirmText || "OK";
+    if (opts.danger) okBtn.className = "vn-ask-danger";
+    row.appendChild(cancel);
+    row.appendChild(okBtn);
+    card.appendChild(row);
+    ov.appendChild(card);
+    (document.getElementById('game') || document.body).appendChild(ov);
+
+    void ov.offsetWidth;              // commit the pre-transition state...
+    ov.classList.add('is-in');        // ...then flip, so it animates even if
+                                     // the tab was backgrounded (no rAF)
+    (opts.danger ? cancel : okBtn).focus();
+
+    var settled = false;
+    function finish(val) {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener('keydown', onKey, true);
+      ov.classList.remove('is-in');
+      setTimeout(function () { if (ov.parentNode) ov.parentNode.removeChild(ov); }, 240);
+      overlayOpen = wasOverlay;
+      sfx(val ? 'confirm' : 'back');
+      if (onDone) onDone(val);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); finish(false); }
+      else if (e.key === 'Enter') { e.stopPropagation(); e.preventDefault(); finish(true); }
+    }
+    document.addEventListener('keydown', onKey, true);
+    cancel.addEventListener('click', function () { finish(false); });
+    okBtn.addEventListener("click", function () { finish(true); });
+    ov.addEventListener('click', function (e) { if (e.target === ov) finish(false); });
+  }
   function manualCheckpoint() {
     var cp = pushCheckpoint('Manual - ' + (segmentNameAt(state.ptr) || 'save'));
     var prev = el.btnSave.textContent;
@@ -964,11 +1032,18 @@
       li.appendChild(main);
       li.appendChild(meta);
       li.addEventListener('click', function () {
-        if (!window.confirm('Jump back to "' + (cp.label || 'Checkpoint') + '"? Current progress is overwritten.')) return;
-        sfx('confirm');
-        closeCheckpoints();
-        loadCheckpoint(cp);
-        resumeAfterLoad();
+        askConfirm({
+          title: 'Jump back?',
+          body: 'Return to "' + (cp.label || 'Checkpoint') +
+                '". Your current progress will be overwritten.',
+          confirmText: 'Jump back',
+          cancelText: 'Stay here'
+        }, function (yes) {
+          if (!yes) return;
+          closeCheckpoints();
+          loadCheckpoint(cp);
+          resumeAfterLoad();
+        });
       });
       el.cpList.appendChild(li);
     });
@@ -1060,10 +1135,18 @@
   }
   function wipeSave() {
     if (!lsGet(SAVE_KEY) && !readCheckpoints().length) return;
-    if (!window.confirm('Erase the save and every checkpoint? This cannot be undone.')) return;
-    lsDel(SAVE_KEY);
-    lsDel(CP_KEY);
-    refreshContinue();
+    askConfirm({
+      title: 'Erase save?',
+      body: 'This deletes your save and every checkpoint. It cannot be undone.',
+      confirmText: 'Erase everything',
+      cancelText: 'Keep it',
+      danger: true
+    }, function (yes) {
+      if (!yes) return;
+      lsDel(SAVE_KEY);
+      lsDel(CP_KEY);
+      refreshContinue();
+    });
   }
 
   /* ===========================================================
@@ -1130,9 +1213,14 @@
   if (el.cpClose) el.cpClose.addEventListener('click', function () { sfx('click'); closeCheckpoints(); });
   el.btnSettings.addEventListener('click', function () { sfx('click'); openSettings(); });
   el.btnQuit.addEventListener('click', function () {
-    sfx('back');
-    if (!window.confirm('Return to the menu? Unsaved progress is lost.')) return;
-    toTitle();
+    askConfirm({
+      title: 'Return to menu?',
+      body: 'Any progress since your last checkpoint will be lost.',
+      confirmText: 'Return to menu',
+      cancelText: 'Keep playing'
+    }, function (yes) {
+      if (yes) toTitle();
+    });
   });
   el.settingsClose.addEventListener('click', function () { sfx('click'); closeSettings(); });
   el.endContinue.addEventListener('click', function () { sfx('confirm'); });

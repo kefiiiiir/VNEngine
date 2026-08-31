@@ -8,7 +8,10 @@ Interactive:
 
 Asks for a project name, title, author and a destination folder, then copies
 the engine template into  <destination>/<ProjectName>/  ready to run with
-``python playtest.py``.
+``python playtest.py``. It also offers to ``pip install`` the two Python
+packages a project needs - ``pywebview`` (playtest window) and
+``pyinstaller`` (packager) - so a fresh project runs and builds out of the
+box.
 
 Later this file is meant to be frozen into a single setup.exe; the template is
 The release keeps ``template/`` as a real folder next to ``setup.exe`` (so it
@@ -154,13 +157,16 @@ def ask(prompt, default=""):
     return val or default
 
 
-def ask_yes(prompt):
-    print("%s  %s  %s" % (cyan(G["act"]), bold(prompt), dim("[y/N]")))
+def ask_yes(prompt, default=False):
+    tag = "[Y/n]" if default else "[y/N]"
+    print("%s  %s  %s" % (cyan(G["act"]), bold(prompt), dim(tag)))
     try:
         ans = input("%s  " % dim(G["bar"])).strip().lower()
     except (EOFError, KeyboardInterrupt):
         ans = ""
     bar()
+    if not ans:
+        return default
     return ans in ("y", "yes")
 
 
@@ -401,6 +407,47 @@ def patch_index(index_html, title, author):
         f.write(html)
 
 
+# --------------------------------------------------------------------------- #
+#  Python dependencies for playing / building a project                        #
+# --------------------------------------------------------------------------- #
+
+# playtest.py opens its window with pywebview; the packager freezes with
+# PyInstaller. Everything else the engine needs is pure stdlib.
+DEPS = ["pywebview", "pyinstaller"]
+
+
+def _pip_python():
+    """An interpreter we can run ``-m pip`` with. As a script that's just us;
+    frozen into setup.exe, look for a real Python on PATH."""
+    if not getattr(sys, "frozen", False):
+        return sys.executable
+    return shutil.which("python") or shutil.which("py")
+
+
+def install_deps():
+    """Best-effort ``pip install`` of DEPS. Never blocks the scaffold - on any
+    problem it just prints the manual command. Returns True if deps are ready."""
+    py = _pip_python()
+    if not py:
+        warn("no Python on PATH - skipping dependency install")
+        note("run it yourself:  pip install " + " ".join(DEPS))
+        return False
+    with Spinner("Installing " + ", ".join(DEPS) + "  (pip)"):
+        proc = subprocess.run(
+            [py, "-m", "pip", "install", *DEPS],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+        )
+    if proc.returncode == 0:
+        ok("Dependencies ready  " + dim("(" + ", ".join(DEPS) + ")"))
+        return True
+    warn("pip couldn't install the dependencies")
+    for ln in (proc.stdout or "").strip().splitlines()[-12:]:
+        bar(dim(ln))
+    note("run it yourself:  pip install " + " ".join(DEPS))
+    return False
+
+
 def main():
     template = _template_dir()
     if template is None:
@@ -444,11 +491,21 @@ def main():
             }, f, indent=2)
             f.write("\n")
 
-    outro("Created  " + dest, [
-        "cd " + dest,
+    bar()
+    deps_ok = (install_deps()
+               if ask_yes("Install the Python dependencies now "
+                          "(pywebview, pyinstaller)?", default=True)
+               else False)
+
+    steps = ["cd " + dest]
+    if not deps_ok:
+        steps.append(green("pip install " + " ".join(DEPS)) +
+                     dim("       deps for play / build"))
+    steps += [
         green("python playtest.py") + dim("                       play it"),
         green("python tools/projectpackager-windows.py") + dim("   build it"),
-    ])
+    ]
+    outro("Created  " + dest, steps)
 
     post_create_menu(dest)
 

@@ -12,6 +12,13 @@ on itself).
 
 Writes ``<out_dir>/runtime-windows.exe`` and prints its path. Needs PyInstaller
 (``pip install pyinstaller``); this is the only place it is used.
+
+The runtime opens the game in a native window via pywebview
+(``pip install pywebview``), so pywebview and its Windows WebView2 backend
+(pythonnet / clr_loader) are collected into the freeze. A development
+(``--console``) build also bundles ``tools/devlog.js`` next to the exe so the
+frozen server can inject its console bridge; a shipping build has no console
+and never serves it.
 """
 
 import os
@@ -33,12 +40,26 @@ def build(script, out_dir, windowed=False):
 
     os.makedirs(out_dir, exist_ok=True)
     work = tempfile.mkdtemp(prefix="vnrt_")
+
+    # pywebview: pull the package + its Windows backend deps into the freeze.
+    extra = [
+        "--collect-all", "webview",
+        "--hidden-import", "webview.platforms.winforms",
+        "--hidden-import", "clr_loader",
+        "--hidden-import", "pythonnet",
+    ]
+    # devlog.js ships beside the exe for --console builds only.
+    devlog = os.path.join(os.path.dirname(script), "tools", "devlog.js")
+    if not windowed and os.path.isfile(devlog):
+        extra += ["--add-data", devlog + os.pathsep + "."]
+
     try:
         rc = subprocess.call([
             sys.executable, "-m", "PyInstaller",
             "--noconfirm", "--clean", "--onefile",
             "--name", "runtime-windows",
             "--windowed" if windowed else "--console",
+            *extra,
             "--distpath", os.path.join(work, "dist"),
             "--workpath", os.path.join(work, "build"),
             "--specpath", work,

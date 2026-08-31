@@ -468,6 +468,26 @@ body{
   opacity:0;transition:opacity .3s ease,transform .3s ease;pointer-events:none}
 .vn-toast.is-in{opacity:1;transform:translate(-50%,0)}
 
+/* ---- in-world confirm dialog (replaces window.confirm) ---- */
+.vn-ask{z-index:60;opacity:0;transition:opacity .18s ease}
+.vn-ask.is-in{opacity:1}
+.vn-ask .overlay-card{
+  width:min(420px,90vw);
+  transform:translateY(10px) scale(.97);
+  transition:transform .18s ease}
+.vn-ask.is-in .overlay-card{transform:none}
+.vn-ask h2{margin-bottom:.9rem}
+.vn-ask .vn-ask-body{margin-bottom:1.5rem}
+.vn-ask-actions{display:flex;gap:.7rem}
+.vn-ask .vn-ask-actions button{margin-top:0;flex:1 1 0;width:auto}
+.vn-ask .vn-ask-cancel{background:transparent;color:var(--pink-4);border:2px solid var(--pink-2)}
+.vn-ask .vn-ask-cancel:hover{background:var(--pink-1)}
+.vn-ask .vn-ask-danger{background:#c95b5b}
+.vn-ask .vn-ask-danger:hover{background:#b64a4a}
+@media (prefers-reduced-motion:reduce){
+  .vn-ask,.vn-ask .overlay-card{transition:none}
+}
+
 /* ==========================================================
    EFFECTS - the whole set.  fx('shake') / fx('flash') from a
    script toggle these; both obey the "Screen effects" setting.

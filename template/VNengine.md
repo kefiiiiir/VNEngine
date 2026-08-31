@@ -24,10 +24,23 @@ python playtest.py            # first free port from 8000 up
 python playtest.py 5500       # prefer this port (falls forward if taken)
 ```
 
-`playtest.py` is a minimal static file server and nothing else. In dev
-mode it sends `Cache-Control: no-store`, so the browser always has your
-latest edit - just reload, no cache-busting needed. Set `VN_NO_BROWSER=1`
-to stop it opening a tab. `Ctrl+C` stops it.
+`playtest.py` is a minimal static file server and nothing else. It opens
+the game in a **native window** (via `pywebview` - `setup` offers to
+install it; otherwise `pip install pywebview`); **closing that window
+stops the server**, there's no separate Ctrl+C step. If `pywebview` isn't
+installed it falls back to opening your default browser and running until
+Ctrl+C. Set `VN_NO_BROWSER=1` to serve headlessly (no window).
+
+In dev mode it sends `Cache-Control: no-store`, so the browser always has
+your latest edit - just reload, no cache-busting needed.
+
+**Diagnostics in the terminal.** Whenever `playtest.py` has a console to
+print to (running from source, or a `development` packaged build), it
+injects a tiny dev shim (`tools/devlog.js`) into `index.html` that
+forwards the browser console back to the terminal: the boot-time script
+check, uncaught errors, and failed image/audio loads all show up where
+you're already looking. You never have to open F12. A `shipping` build
+has no console and serves `index.html` untouched.
 
 ---
 
@@ -47,10 +60,12 @@ Load order in `index.html` matters: `audio.js`, `data.js`, `story.js`,
 then `engine.js`. Fonts are bundled in `src/fonts/` and `@font-face`d in
 `style.css` - nothing is fetched from the network.
 
-At boot the engine validates your script and prints anything suspect to
-the browser console (unknown `jump`/`choice` targets, duplicate labels,
-characters or sfx names it doesn't recognise, unreachable ops), each with
-the op index. It never stops the game - it just tells you.
+At boot the engine validates your script and prints anything suspect
+(unknown `jump`/`choice` targets, duplicate labels, characters or sfx
+names it doesn't recognise, unreachable ops), each with the op index. It
+never stops the game - it just tells you. This goes to the browser
+console *and*, when you're running `playtest.py` with a console,
+straight into that terminal (see §1).
 
 ---
 
