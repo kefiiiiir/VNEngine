@@ -1,9 +1,23 @@
-# VNengine
+<div align="center">
+  <img src="icons/logo.png" width="160" alt="VNEngine logo">
+
+  # VNengine
+
+  [![License](https://img.shields.io/github/license/kefiiiiir/VNEngine?color=8a4fff)](LICENSE)
+  [![Release](https://img.shields.io/github/v/release/kefiiiiir/VNEngine?include_prereleases&color=8a4fff)](../../releases)
+  [![Platform](https://img.shields.io/badge/platform-Windows-8a4fff)](../../releases)
+</div>
 
 A small, **code-first visual novel engine**. You write your novel as a
 JavaScript array of "ops"; the engine plays it. No build step, no framework,
 no runtime dependencies in the engine itself — four plain JavaScript files,
 one stylesheet, one HTML page.
+
+<div align="center">
+  <img src="icons/screenshot-demo.png" width="800" alt="VNEngine demo game running in its native window, next to the playtest terminal">
+  <br>
+  <sub>The bundled demo, running via <code>playtest</code> — native window on the right, live diagnostics on the left.</sub>
+</div>
 
 It's the runtime, not the game — like an engine rather than a finished title.
 Every project starts as a copy of the engine plus a tiny worked demo, so you
@@ -98,6 +112,8 @@ player installs nothing.
 
 ---
 
+<img src="icons/icon-setup.png" width="28" align="left" alt="">
+
 ## Get started
 
 **Download (Windows).** Grab `VNEngine-Dist.zip` from the
@@ -119,6 +135,9 @@ Either way you answer a few prompts (name, title, author, destination).
 You get a **project folder** — your own copy of the engine, ready to edit,
 like a fresh Unity or Unreal project.
 
+<img src="icons/screenshot-setup.png" width="600" alt="setup.py prompting for project name, title, author and destination folder in a terminal">
+
+
 ### Play it while you build
 
 ```bash
@@ -134,6 +153,8 @@ window stops the server.
 You can still just double-click `index.html` — everything works from
 `file://` including saves; the server only makes audio decoding more reliable
 and adds the terminal diagnostics.
+
+<img src="icons/icon-package.png" width="28" align="left" alt="">
 
 ### Ship a distributable
 
@@ -159,6 +180,9 @@ The first run of each profile freezes the runtime from your `playtest.py`
 (via `tools/projectpackager-tools/build-runtime.py`) and caches it **per
 profile** (keyed on a hash of `playtest.py`); later runs reuse the cache and
 only rebuild when `playtest.py` changes. After that it's just copy + zip.
+
+<img src="icons/screenshot-package.png" width="600" alt="the packager prompting for archive format, build profile and output directory, then producing a .exe and .pak">
+
 
 ---
 
