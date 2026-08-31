@@ -1,7 +1,7 @@
 <div align="center">
   <img src="icons/logo.png" width="160" alt="VNEngine logo">
 
-  # VNengine
+  # VNEngine
 
   [![License](https://img.shields.io/github/license/kefiiiiir/VNEngine?color=8a4fff)](LICENSE)
   [![Release](https://img.shields.io/github/v/release/kefiiiiir/VNEngine?include_prereleases&color=8a4fff)](../../releases)
@@ -194,15 +194,16 @@ css/style.css     all styling; theme via the :root variables at the top
 js/data.js        your assets manifest  -> window.VNData     (EDIT THIS)
 js/story.js       your script           -> window.VNScript   (EDIT THIS)
 js/audio.js       music + sound engine  -> window.VNAudio    (reusable as-is)
+js/save-resolve.js  save/position hashing + resolution (usually left alone)
 js/engine.js      the runtime           (usually left alone)
 src/              your images and audio
 playtest.py       the local server + window launcher
 project.json      name / title / author  (setup writes it; titles the window)
 tools/            the packager (the "Build" step) + everything it needs
-VNengine.md       the full manual — every op, with examples
+VNEngine.md       the full manual — every op, with examples
 ```
 
-**Start with [`VNengine.md`](template/VNengine.md)** — it documents every
+**Start with [`VNEngine.md`](template/VNEngine.md)** — it documents every
 scripting op (`say`, `bg`, `show`, `choice`, `music`, `fx`, checkpoints, …)
 with copy-paste examples.
 
@@ -217,7 +218,7 @@ The repo holds the engine and its tooling in **Python + JS source form**; the
 ```
 setup.py           scaffold a new project        (published as setup.exe)
 template/          the engine — copied wholesale into every new project
-  index.html  playtest.py  VNengine.md
+  index.html  playtest.py  VNEngine.md
   css/  js/  src/
   tools/
     projectpackager-windows.py    the "Build" step  (published as .exe, in-project)

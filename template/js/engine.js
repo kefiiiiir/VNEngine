@@ -128,52 +128,17 @@
   var typing = false, typeTimer = null, fullHTML = '', waiter = null;
   var choicesOpen = false, overlayOpen = false;
 
-  /* ---------- labels + script hash + validation ---------- */
-  var LABELS = {};
-  var labelDupes = {};
-  SC.ops.forEach(function (op, i) {
-    if (op.op === 'label') {
-      if (LABELS[op.name] != null) labelDupes[op.name] = true;
-      LABELS[op.name] = i;
-    }
-  });
+  /* ---------- labels + script hash + validation ----------
+     digestOps/hashStr/buildLabels/segmentNameAt/posFromPtr/resolvePos
+     live in js/save-resolve.js (window.VNSaveResolve) - pure, DOM-free,
+     shared with the Node tests in tests/. */
+  var SR = window.VNSaveResolve;
+  var labelInfo = SR.buildLabels(SC.ops);
+  var LABELS = labelInfo.labels;
+  var labelDupes = labelInfo.dupes;
+  var LABELS_SORTED = labelInfo.sorted;
 
-  // A cheap structural digest of the script.  Stamped into every save so a
-  // load can tell whether the script has changed underneath it.  We can't
-  // JSON.stringify the ops directly - `if` conditions are functions - so we
-  // fold in the meaningful fields by hand, cond functions included.
-  function digestOps(ops) {
-    var out = [];
-    for (var i = 0; i < ops.length; i++) {
-      var o = ops[i], s = o.op || '?';
-      switch (o.op) {
-        case 'say':    s += '|' + (o.who || '') + '|' + (o.text || ''); break;
-        case 'label':  s += '|' + o.name; break;
-        case 'jump':   s += '|' + o.to; break;
-        case 'if':     s += '|' + o.to + '|' + String(o.cond); break;
-        case 'set':    s += '|' + safeJson(o.vars); break;
-        case 'scene':  s += '|' + o.bg; break;
-        case 'show':   s += '|' + o.who + '|' + (o.expr || '') + '|' + (o.pos || ''); break;
-        case 'hide':   s += '|' + o.who; break;
-        case 'fx':     s += '|' + o.effect + '|' + (o.color || ''); break;
-        case 'choice':
-          s += '|' + (o.options || []).map(function (x) {
-            return (x.text || '') + '>' + (x.to || '');
-          }).join(';');
-          break;
-        case 'chapterEnd': s += '|' + (o.title || '') + '|' + (o.next || ''); break;
-      }
-      out.push(s);
-    }
-    return out.join('\n');
-  }
-  function safeJson(v) { try { return JSON.stringify(v); } catch (e) { return ''; } }
-  function hashStr(str) {
-    var h = 5381;
-    for (var i = 0; i < str.length; i++) h = (((h << 5) + h) ^ str.charCodeAt(i)) >>> 0;
-    return h.toString(36);
-  }
-  var SCRIPT_HASH = hashStr(digestOps(SC.ops));
+  var SCRIPT_HASH = SR.hashStr(SR.digestOps(SC.ops));
 
   function validateScript() {
     var errs = [], warns = [];
@@ -187,7 +152,7 @@
     });
     var unreachableFrom = -1, unreachableFlagged = false;
     SC.ops.forEach(function (o, i) {
-      var near = segmentNameAt(i);
+      var near = SR.segmentNameAt(LABELS_SORTED, i);
       var at = ' (op #' + i + (near ? ', near "' + near + '"' : '') + ')';
       if ((o.op === 'jump' || o.op === 'if') && LABELS[o.to] == null)
         errs.push('unknown ' + o.op + ' target "' + o.to + '"' + at);
@@ -370,17 +335,25 @@
   // Substitution order matters for safety: resolve tokens into the raw
   // string first, THEN html-escape the whole thing (so a player name or a
   // var value can never inject markup), THEN turn the [b]/[i]/[c] shortcuts
-  // into real tags on the now-safe string.
+  // into real tags on the now-safe string. HTML-escaping alone stops real
+  // injection, but [b]/[i]/[c=...] aren't HTML - they're plain-text markers
+  // applyMarkup() expands *after* escaping, so a player-chosen value like a
+  // name still reaches it unescaped-for-markup-purposes. So values that come
+  // from the player (name) or from script `set` state (vars) are stripped
+  // of any [x]/[/x]-shaped markup *before* substitution, so a player can't
+  // name themselves "[b]Bob" and get it bolded. Writer-authored markup
+  // elsewhere in the line (outside a substituted token) is untouched.
+  function stripMarkup(v) { return String(v).replace(/\[\/?[a-z][\w#().,%=\s-]*\]/gi, ''); }
   function fmt(t) {
-    var first = state.player.first || 'Player';
-    var last = state.player.last || '';
+    var first = stripMarkup(state.player.first || 'Player');
+    var last = stripMarkup(state.player.last || '');
     t = String(t)
       .replace(/\{first\}/g, first)
       .replace(/\{last\}/g, last)
       .replace(/\{name\}/g, (first + ' ' + last).trim())
       .replace(/\{(\w+)\}/g, function (m, k) {
         var v = state.vars[k];
-        return (v === undefined || v === null) ? m : String(v);
+        return (v === undefined || v === null) ? m : stripMarkup(v);
       });
     var div = document.createElement('div');
     div.textContent = t;
@@ -498,7 +471,7 @@
   function doSay(c) {
     cancelAuto();
     var here = state.ptr - 1;
-    var pos = posFromPtr(here);
+    var pos = SR.posFromPtr(LABELS, LABELS_SORTED, here);
     var seenKey = pos.label + '#' + pos.offset;
     var who = c.who;
     var ch = who && D.CHARACTERS[who];
@@ -789,32 +762,11 @@
     var a = lsGet(CP_KEY);
     return (a && a.length) ? a : [];
   }
-  function segmentNameAt(ptr) {
-    var best = null, bestIdx = -1;
-    Object.keys(LABELS).forEach(function (nm) {
-      var i = LABELS[nm];
-      if (i <= ptr && i > bestIdx) { bestIdx = i; best = nm; }
-    });
-    return best || '';
-  }
-  // Position as (nearest preceding label, ops since that label) instead of a
-  // raw op index, so inserting a line in one scene doesn't shove every save
-  // in every later scene onto the wrong line.
-  function posFromPtr(ptr) {
-    var label = segmentNameAt(ptr);
-    var base = (label && LABELS[label] != null) ? LABELS[label] : 0;
-    return { label: label, offset: ptr - base };
-  }
-  function resolvePos(pos) {
-    if (!pos) return 0;
-    if (pos.label && LABELS[pos.label] != null)
-      return Math.max(0, Math.min(LABELS[pos.label] + (pos.offset || 0), SC.ops.length));
-    if (typeof pos.ptr === 'number') return Math.max(0, Math.min(pos.ptr, SC.ops.length));
-    return 0;
-  }
+  // segmentNameAt/posFromPtr/resolvePos live in js/save-resolve.js
+  // (window.VNSaveResolve, aliased to SR above).
   function makeSaveRecord(ptr) {
     return {
-      v: 2, hash: SCRIPT_HASH, pos: posFromPtr(ptr),
+      v: 3, hash: SCRIPT_HASH, pos: SR.posFromPtr(LABELS, LABELS_SORTED, ptr),
       vars: clone(state.vars), player: clone(state.player), stage: clone(state.stage)
     };
   }
@@ -824,10 +776,10 @@
     var rec = makeSaveRecord(ptr);
     var cp = {
       id: 'cp' + Date.now().toString(36) + '_' + ((Math.random() * 1e6) | 0).toString(36),
-      label: label || segmentNameAt(ptr) || 'Autosave',
+      label: label || SR.segmentNameAt(LABELS_SORTED, ptr) || 'Autosave',
       isChapterEnd: !!opts.isChapterEnd,
       ts: Date.now(),
-      v: 2, hash: rec.hash, pos: rec.pos,
+      v: 3, hash: rec.hash, pos: rec.pos,
       vars: rec.vars, player: rec.player, stage: rec.stage
     };
     var list = readCheckpoints();
@@ -854,18 +806,24 @@
     if (!state.stage.sprites) state.stage.sprites = {};
 
     var mismatch = false, canRestartChapter = true;
-    if (s.v === 2) {
+    if (s.v === 3) {
       if (s.hash !== SCRIPT_HASH) mismatch = true;
       if (!s.pos || (s.pos.label && LABELS[s.pos.label] == null)) {
         mismatch = true;
         canRestartChapter = !!(s.pos && s.pos.label && LABELS[s.pos.label] != null);
       }
-      state.ptr = resolvePos(s.pos);
+      state.ptr = SR.resolvePos(LABELS, SC.ops.length, s.pos);
     } else {
-      // legacy v1 save - no hash to compare, raw index, warn to be safe
+      // legacy save (v1: raw ptr index. v2: pos-anchored like v3, but its
+      // hash included dialogue text, so it can't be trusted as "same
+      // version" anymore) - no reliable hash to compare, warn to be safe,
+      // but still resolve position if we can (v2's `pos` shape works with
+      // resolvePos same as v3; v1's raw `ptr` is the fallback inside it).
       mismatch = true;
       canRestartChapter = false;
-      state.ptr = (typeof s.ptr === 'number') ? Math.max(0, Math.min(s.ptr, SC.ops.length)) : 0;
+      state.ptr = (s.pos && s.pos.label && LABELS[s.pos.label] != null)
+        ? SR.resolvePos(LABELS, SC.ops.length, s.pos)
+        : ((typeof s.ptr === 'number') ? Math.max(0, Math.min(s.ptr, SC.ops.length)) : 0);
     }
     pendingCompat = mismatch
       ? { label: (s.pos && s.pos.label) || '', canRestartChapter: canRestartChapter }
@@ -992,7 +950,7 @@
     ov.addEventListener('click', function (e) { if (e.target === ov) finish(false); });
   }
   function manualCheckpoint() {
-    var cp = pushCheckpoint('Manual - ' + (segmentNameAt(state.ptr) || 'save'));
+    var cp = pushCheckpoint('Manual - ' + (SR.segmentNameAt(LABELS_SORTED, state.ptr) || 'save'));
     var prev = el.btnSave.textContent;
     el.btnSave.textContent = cp._ok ? '✓' : '✕';
     setTimeout(function () { el.btnSave.textContent = prev; }, 800);

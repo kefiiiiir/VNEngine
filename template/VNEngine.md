@@ -1,4 +1,4 @@
-# VNengine
+# VNEngine
 
 A small, code-first visual novel engine. No build step, no framework - four
 plain JavaScript files, one stylesheet, one HTML page, and the engine itself
@@ -59,6 +59,7 @@ css/style.css     all styling; theme via the CSS variables at the top
 js/audio.js       music + sound engine  -> window.VNAudio   (self-contained, reusable)
 js/data.js        your assets manifest  -> window.VNData     (EDIT THIS)
 js/story.js       your script           -> window.VNScript   (EDIT THIS)
+js/save-resolve.js  save/position hashing + resolution (usually left alone)
 js/engine.js      the runtime           (usually left alone)
 src/              your images and audio (see src/README.md)
 playtest.py       the local server + native-window launcher
@@ -67,8 +68,8 @@ tools/            the packager - the "Build" step (see tools/README.md)
 ```
 
 Load order in `index.html` matters: `audio.js`, `data.js`, `story.js`,
-then `engine.js`. Fonts are bundled in `src/fonts/` and `@font-face`d in
-`style.css` - nothing is fetched from the network.
+`save-resolve.js`, then `engine.js`. Fonts are bundled in `src/fonts/` and
+`@font-face`d in `style.css` - nothing is fetched from the network.
 
 At boot the engine validates your script and prints anything suspect
 (unknown `jump`/`choice` targets, duplicate labels, characters or sfx
@@ -269,6 +270,9 @@ code: `VNAudio.duck(amount, ms)`.
   anyway, restart the chapter, or go back to the title.
 - "Seen" (for fast-forward / skip) is global read-tracking, stored once
   under `vnengine_seen` - not copied into every checkpoint.
+- **Rollback history and the backlog are memory-only** - the 50-line
+  rollback buffer and the on-screen backlog both reset on reload; only
+  checkpoints/auto-save/seen-tracking are written to `localStorage`.
 - Destructive actions (jump to a checkpoint, return to menu, **Erase save**)
   ask first with an in-engine modal styled like the rest of the game - not a
   browser `confirm()` box. Escape or a click outside cancels.
@@ -288,8 +292,8 @@ code: `VNAudio.duck(amount, ms)`.
 | Music volume / Sound volume / Mute | audio levels (persist immediately) |
 | Screen effects | gate for `fx('shake')` / `fx('flash')` |
 | Fast-forward seen text | already-seen lines appear instantly |
-| Auto-advance delay | pause between lines in auto mode (`A`) |
-| Skip unseen text too | let `Ctrl`/`Tab` skip race through unread lines, not just seen ones |
+| Auto-advance delay | pause between lines in auto mode |
+| Skip unseen text too | let skip race through unread lines too, not just seen ones |
 
 ---
 

@@ -9,7 +9,14 @@ projectpackager-tools/
   build-runtime.py                  freezes playtest.py -> a runtime .exe
   cache/                            built runtimes (per profile) + playtest hashes
                                     (rebuilt only when playtest.py changes)
+tests/
+  save-resolve.test.js              plain-Node tests for js/save-resolve.js
+                                    (run: node template/tools/tests/save-resolve.test.js)
 ```
+
+Nothing under `tools/` ships in a built game - `projectpackager-windows`'s
+archive only packs `css/`, `js/`, `src/` (plus `index.html` /
+`project.json`), so `tests/` here is dev-only, same as `devlog.js`.
 
 `projectpackager-windows` finds the project, picks a **build profile**,
 makes sure a current runtime for that profile exists (building it through

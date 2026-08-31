@@ -448,6 +448,19 @@ def install_deps():
     return False
 
 
+def _looks_like_vnengine_project(folder):
+    """True only if `folder` contains a project.json written by this
+    scaffolder (engine == "VNengine"). Guards the overwrite prompt against
+    accidentally pointing setup.py at an unrelated, non-empty folder."""
+    pj = os.path.join(folder, "project.json")
+    try:
+        with open(pj, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("engine") == "VNengine"
+
+
 def main():
     template = _template_dir()
     if template is None:
@@ -469,10 +482,18 @@ def main():
 
     dest = os.path.abspath(os.path.join(os.path.expanduser(dest_root), name))
     if os.path.isdir(dest) and os.listdir(dest):
-        if not ask_yes("%s exists and is not empty - overwrite its contents?" % dest):
+        file_count = sum(len(files) for _, _, files in os.walk(dest))
+        if not _looks_like_vnengine_project(dest):
+            die("%s exists and isn't a VNengine project (no project.json with "
+                "\"engine\": \"VNengine\") - refusing to touch it. Pick a "
+                "different name or destination folder." % dest)
+        if not ask_yes("%s exists and is not empty (%d file%s) - overwrite its contents?" %
+                       (dest, file_count, "" if file_count == 1 else "s")):
             bar(red("cancelled"))
             sys.exit(1)
-        shutil.rmtree(dest)
+        backup = dest + ".bak-" + datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        os.rename(dest, backup)
+        note("previous contents kept at %s" % backup)
 
     with Spinner("Copying engine template into %s" % name):
         shutil.copytree(template, dest, dirs_exist_ok=True)

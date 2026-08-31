@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>VNengine - demo</title>
+<title>VNEngine - demo</title>
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -16,7 +16,7 @@
       <!-- LOGO:start (setup.py rewrites this block from project.json) -->
       <h1 class="logo">
         <span class="logo-a">VN</span>
-        <span class="logo-b">engine</span>
+        <span class="logo-b">Engine</span>
         <span class="logo-sub">a code-first visual novel engine</span>
       </h1>
       <!-- LOGO:end -->
@@ -28,7 +28,7 @@
         <button data-action="wipe" class="menu-danger">Erase save</button>
       </nav>
       <!-- CREDIT:start (setup.py rewrites this line from project.json) -->
-      <p class="title-credit">edit <code>js/story.js</code> and <code>js/data.js</code> to build your own &middot; see <code>VNengine.md</code></p>
+      <p class="title-credit">edit <code>js/story.js</code> and <code>js/data.js</code> to build your own &middot; see <code>VNEngine.md</code></p>
       <!-- CREDIT:end -->
     </div>
   </section>
@@ -74,13 +74,13 @@
     </div>
 
     <div class="vn-topbar">
-      <button id="btnRollback" title="Back one line">↶</button>
-      <button id="btnBacklog" title="History">▤</button>
-      <button id="btnSkip" title="Skip (stops at choices)">⏩</button>
-      <button id="btnAuto" title="Auto-advance">▶</button>
-      <button id="btnSave" title="Save checkpoint">💾</button>
-      <button id="btnSettings" title="Settings">⚙</button>
-      <button id="btnQuit" title="To menu">✕</button>
+      <button id="btnRollback" title="Back one line" aria-label="Back one line">↶</button>
+      <button id="btnBacklog" title="History" aria-label="History">▤</button>
+      <button id="btnSkip" title="Skip (stops at choices)" aria-label="Skip (stops at choices)">⏩</button>
+      <button id="btnAuto" title="Auto-advance" aria-label="Auto-advance">▶</button>
+      <button id="btnSave" title="Save checkpoint" aria-label="Save checkpoint">💾</button>
+      <button id="btnSettings" title="Settings" aria-label="Settings">⚙</button>
+      <button id="btnQuit" title="To menu" aria-label="To menu">✕</button>
     </div>
   </section>
 
@@ -160,6 +160,7 @@
 <script src="js/audio.js"></script>
 <script src="js/data.js"></script>
 <script src="js/story.js"></script>
+<script src="js/save-resolve.js"></script>
 <script src="js/engine.js"></script>
 </body>
 </html>
