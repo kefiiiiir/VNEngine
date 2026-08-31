@@ -234,13 +234,33 @@ template/          the engine — copied wholesale into every new project
 
 ## Status
 
-**v0.2.1 — Windows-first.** The engine (JS/CSS/HTML) is
-platform-neutral and runs anywhere a browser does. The tooling targets
-Windows: the packager freezes a Windows `.exe`, and the native window uses
-WebView2. Running `playtest.py` from source works on macOS/Linux too if
-`pywebview` has a backend there, but that path is untested.
+**v0.2.1 — Windows-first.** The engine (JS/CSS/HTML) is platform-neutral
+and runs anywhere a browser does; the tooling (setup, packaging, the
+frozen native window) targets Windows first. See **Platform support**
+below for the breakdown.
 
 Stable: the scripting ops, saves/checkpoints, the validator, packaging.
 Rough edges: the first frozen build per machine can take a minute; a
 mis-bundled `pywebview` falls back to the default browser rather than
 erroring; only a single `.pak` beside the `.exe` is supported.
+
+---
+
+## Platform support
+
+| piece | Windows | macOS | Linux |
+|---|---|---|---|
+| **the engine** (`template/` — JS/CSS/HTML) | ✅ | ✅ | ✅ — anywhere a browser runs |
+| **`setup.py` / `setup.exe`** (scaffolder) | ✅ tested, published as `.exe` | 🟡 `python setup.py` works (pure stdlib) — untested | 🟡 `python setup.py` works (pure stdlib) — untested |
+| **`playtest.py`** — native window via `pywebview` | ✅ tested (WebView2) | 🟡 works if `pywebview` has a backend on your machine — untested | 🟡 same — untested |
+| **`playtest.py`** — headless fallback (`VN_NO_BROWSER=1` or no `pywebview`) | ✅ | ✅ opens default browser | ✅ opens default browser |
+| **the packager** (`tools/projectpackager-windows`) | ✅ freezes a Windows `.exe` | ❌ not built | ❌ not built |
+
+✅ tested and supported · 🟡 expected to work, not covered by CI or
+regularly exercised · ❌ not available
+
+If you get `setup.py` or `playtest.py` running on macOS/Linux, or want to
+take on a packager for another platform, that's exactly the kind of gap
+noted on the [Roadmap](#roadmap) below — issues and PRs welcome.
+
+---
