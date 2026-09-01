@@ -160,11 +160,19 @@
         if (opt.to != null && LABELS[opt.to] == null)
           errs.push('choice option -> unknown label "' + opt.to + '"' + at);
       });
-      if ((o.op === 'say' || o.op === 'show') && o.who && o.who !== 'mc' &&
+      if ((o.op === 'say' || o.op === 'show' || o.op === 'move') && o.who && o.who !== 'mc' &&
           !(D.CHARACTERS && D.CHARACTERS[o.who]))
         warns.push('character "' + o.who + '" is not in VNData.CHARACTERS' + at);
+      if ((o.op === 'show' || o.op === 'move') && o.pos &&
+          !POSITIONS[o.pos] && o.x == null && o.y == null)
+        warns.push('position "' + o.pos + '" is not in VNData.POSITIONS and no x/y given' +
+                   ' - falls back to centre' + at);
       if (o.op === 'sfx' && o.name && !known(o.name))
         warns.push('sfx "' + o.name + '" is neither a synth sound nor in VNData.SFX_FILES' + at);
+      if (o.op === 'log' && o.level != null &&
+          ['normal', 'warning', 'critical'].indexOf(o.level) === -1)
+        warns.push('PlayTestLog level "' + o.level + '" is not normal/warning/critical' +
+                   ' - treated as normal' + at);
       if (o.op === 'scene' && o.bg && D.BACKGROUNDS && D.BACKGROUNDS[o.bg] === undefined)
         warns.push('background "' + o.bg + '" is not in VNData.BACKGROUNDS (treated as a raw path)' + at);
 
@@ -212,7 +220,42 @@
     state.stage.bg = name;
   }
 
-  var POS_ORDER = { left: 0, center: 1, right: 2 };
+  /* ---------- positions + character transitions ----------
+     A "position" is { x, y } where x is the sprite's horizontal centre
+     (share of stage width) and y lifts it off the floor (share of stage
+     height, positive = up).  left/center/right are built in; a project adds
+     more in VNData.POSITIONS, or a script passes { x, y } inline.  Named
+     entries win over the defaults so a project can retune left/center/right. */
+  var DEFAULT_POSITIONS = { left: { x: '18%' }, center: { x: '50%' }, right: { x: '82%' } };
+  var POSITIONS = (function () {
+    var out = {}, p = (D && D.POSITIONS) || {};
+    Object.keys(DEFAULT_POSITIONS).forEach(function (k) { out[k] = DEFAULT_POSITIONS[k]; });
+    Object.keys(p).forEach(function (k) { out[k] = p[k]; });
+    return out;
+  })();
+  function cssLen(v) {
+    if (v == null || v === '') return null;
+    return (typeof v === 'number') ? (v + 'px') : String(v);
+  }
+  function resolvePlacement(spr) {              // spr = { pos, x, y, scale }
+    var x = cssLen(spr.x), y = cssLen(spr.y);
+    var named = spr.pos && POSITIONS[spr.pos];
+    if (x == null) x = named ? cssLen(named.x) : '50%';
+    if (y == null) y = (named && named.y != null) ? cssLen(named.y) : '0%';
+    var sc = spr.scale;
+    if (sc == null) sc = (named && named.scale != null) ? named.scale : 100;
+    return { x: x, y: y, scale: String((Number(sc) || 100) / 100) };
+  }
+  var ENTER_KINDS = { fade: 1, rise: 1, 'slide-left': 1, 'slide-right': 1 };
+  function enterKind(name) { return ENTER_KINDS[name] ? name : 'fade'; }
+  var MOVE_EASE = { glide: 'ease-in-out', linear: 'linear', 'ease-in': 'ease-in', 'ease-out': 'ease-out' };
+  function moveEase(name) { return MOVE_EASE[name] || 'ease-in-out'; }
+  var SHOW_DUR_DEFAULT = 300;
+  // How the NEXT renderSprites() should animate each id.  Transient - never
+  // cloned into state / history / a save, so any restore path starts empty
+  // and can't animate from a stale hint.
+  var pendingAnim = {};
+
   function spriteSrc(ch, expr) {
     var s = ch.sprites || {};
     return s[expr] || s.idle || '';
@@ -229,22 +272,23 @@
     var node = document.createElement('img');
     node.className = 'sprite';
     node.addEventListener('error', function () {
-      if (this.parentNode !== el.sprites) return;
-      var ph = makePlaceholderSprite(ch, id);
-      ph.setAttribute('data-pos', this.getAttribute('data-pos'));
-      ph.setAttribute('data-id', id);
-      ph.style.order = this.style.order;
-      ph.classList.add('is-shown');
-      el.sprites.replaceChild(ph, this);
+      var slot = this.parentNode;
+      if (!slot || !slot.classList || !slot.classList.contains('sprite-slot')) return;
+      slot.replaceChild(makePlaceholderSprite(ch, id), this);
     });
     return node;
   }
   // Diff the stage against the DOM by data-id instead of rebuilding it.
   // Rebuilding restarted spriteBob on every expression change (visible jump)
-  // and killed the fade-in transition (sprites popped in).  Now we only
-  // create/remove what actually changed and swap `src` in place.
-  function renderSprites() {
+  // and killed the enter transition.  We only create/remove/update the
+  // .sprite-slot that actually changed and swap `src` in place.
+  //   renderSprites({ snap: true })  jumps straight to the target stage with
+  //   no animation (used by every restore / rollback / checkpoint path).
+  function renderSprites(opts) {
     var want = state.stage.sprites || {};
+    var snap = !!(opts && opts.snap);
+    if (snap) el.sprites.classList.add('vn-no-anim');
+
     var have = {};
     [].slice.call(el.sprites.children).forEach(function (n) {
       var id = n.getAttribute('data-id');
@@ -253,12 +297,16 @@
 
     Object.keys(have).forEach(function (id) {
       if (want[id] && D.CHARACTERS[id]) return;
-      var n = have[id];
-      n.setAttribute('data-leaving', '1');
-      n.classList.remove('is-shown');
-      var gone = function () { if (n.parentNode) n.parentNode.removeChild(n); };
-      n.addEventListener('transitionend', gone, { once: true });
-      setTimeout(gone, 450);
+      var slot = have[id];
+      var hint = pendingAnim[id] || {};
+      var dur = (hint.dur != null ? hint.dur : SHOW_DUR_DEFAULT);
+      slot.style.setProperty('--vn-dur', dur + 'ms');
+      slot.setAttribute('data-enter', hint.exit || 'fade');
+      slot.setAttribute('data-leaving', '1');
+      slot.classList.remove('is-shown');
+      var gone = function () { if (slot.parentNode) slot.parentNode.removeChild(slot); };
+      slot.addEventListener('transitionend', gone, { once: true });
+      setTimeout(gone, dur + 150);
     });
 
     Object.keys(want).forEach(function (id) {
@@ -266,37 +314,105 @@
       if (!ch) return;
       var s = want[id];
       var src = spriteSrc(ch, s.expr);
-      var node = have[id];
-      var isImg = node && node.tagName === 'IMG';
-      // type flipped between real art and placeholder card -> replace
-      if (node && ((src && !isImg) || (!src && isImg))) {
-        if (node.parentNode) node.parentNode.removeChild(node);
-        node = null;
-      }
-      var order = POS_ORDER[s.pos] != null ? POS_ORDER[s.pos] : 1;
-      if (!node) {
-        node = src ? makeSpriteImg(ch, id) : makePlaceholderSprite(ch, id);
+      var xy = resolvePlacement(s);
+      var hint = pendingAnim[id] || {};
+      var slot = have[id];
+
+      if (!slot) {
+        slot = document.createElement('div');
+        slot.className = 'sprite-slot';
+        slot.setAttribute('data-id', id);
+        var node = src ? makeSpriteImg(ch, id) : makePlaceholderSprite(ch, id);
         if (src) node.setAttribute('src', src);
-        node.setAttribute('data-id', id);
-        node.setAttribute('data-pos', s.pos);
-        node.style.order = order;
-        el.sprites.appendChild(node);
-        void node.offsetWidth;              // reflow so the fade-in actually plays
-        node.classList.add('is-shown');
-      } else {
-        if (isImg && node.getAttribute('src') !== src) node.setAttribute('src', src);
-        node.setAttribute('data-pos', s.pos);
-        node.style.order = order;
-        node.classList.add('is-shown');
+        slot.appendChild(node);
+        slot.style.setProperty('--vn-x', xy.x);
+        slot.style.setProperty('--vn-y', xy.y);
+        slot.style.setProperty('--vn-scale', xy.scale);
+        slot.style.setProperty('--vn-dur', (hint.dur != null ? hint.dur : SHOW_DUR_DEFAULT) + 'ms');
+        slot.setAttribute('data-enter', hint.enter || 'fade');
+        slot.setAttribute('data-pos', s.pos || '');
+        el.sprites.appendChild(slot);
+        void slot.offsetWidth;             // reflow so the enter transition plays
+        slot.classList.add('is-shown');
+        return;
       }
+
+      // type flipped between real art and placeholder card -> swap the inner
+      // node, keep the slot (and its position / shown state).
+      var inner = slot.firstChild;
+      var isImg = inner && inner.tagName === 'IMG';
+      if ((src && !isImg) || (!src && isImg)) {
+        var repl = src ? makeSpriteImg(ch, id) : makePlaceholderSprite(ch, id);
+        if (src) repl.setAttribute('src', src);
+        slot.replaceChild(repl, inner);
+        inner = repl; isImg = !!src;
+      } else if (isImg && inner.getAttribute('src') !== src) {
+        inner.setAttribute('src', src);
+      }
+
+      if (slot.style.getPropertyValue('--vn-x') !== xy.x ||
+          slot.style.getPropertyValue('--vn-y') !== xy.y ||
+          slot.style.getPropertyValue('--vn-scale') !== xy.scale) {
+        slot.style.setProperty('--vn-move-dur', (hint.moveDur || 0) + 'ms');
+        slot.style.setProperty('--vn-move-ease', hint.moveEase || 'ease');
+        void slot.offsetWidth;             // commit the new duration before the value change
+        slot.style.setProperty('--vn-x', xy.x);
+        slot.style.setProperty('--vn-y', xy.y);
+        slot.style.setProperty('--vn-scale', xy.scale);
+      }
+      slot.setAttribute('data-pos', s.pos || '');
+      slot.classList.add('is-shown');      // no re-fire of the enter transition
     });
+
+    if (snap) {
+      void el.sprites.offsetWidth;
+      el.sprites.classList.remove('vn-no-anim');
+    }
+    pendingAnim = {};                       // hints are consumed once
   }
-  function stageShow(id, expr, pos) {
-    state.stage.sprites[id] = { expr: expr || 'idle', pos: pos || 'center' };
+  function stageShow(id, expr, pos, x, y, scale, transition, duration) {
+    state.stage.sprites[id] = {
+      expr: expr || 'idle',
+      pos: pos || null,
+      x: (x == null ? undefined : x),
+      y: (y == null ? undefined : y),
+      scale: (scale == null ? undefined : scale)
+    };
+    pendingAnim[id] = {
+      enter: enterKind(transition),
+      dur: (duration != null ? duration : SHOW_DUR_DEFAULT)
+    };
     renderSprites();
   }
-  function stageHide(id) {
+  function stageHide(id, transition, duration) {
+    pendingAnim[id] = {
+      exit: enterKind(transition),
+      dur: (duration != null ? duration : SHOW_DUR_DEFAULT)
+    };
     delete state.stage.sprites[id];
+    renderSprites();
+  }
+  function stageMove(c) {
+    var id = c.who, spr = state.stage.sprites[id];
+    if (!spr) {
+      console.warn('VNengine: move("' + id + '") but they are not on stage - ' +
+                   'show() them first (op #' + (state.ptr - 1) + ') - ignored.');
+      toast('move: ' + id + ' is not shown');
+      return;
+    }
+    if (c.pos != null) {
+      spr.pos = c.pos;
+      if (c.x == null) spr.x = undefined;       // a named destination clears
+      if (c.y == null) spr.y = undefined;       // stale explicit coords / scale
+      if (c.scale == null) spr.scale = undefined;
+    }
+    if (c.x != null) spr.x = c.x;
+    if (c.y != null) spr.y = c.y;
+    if (c.scale != null) spr.scale = c.scale;
+    var dur = c.duration | 0;
+    pendingAnim[id] = (dur > 0)
+      ? { moveDur: dur, moveEase: moveEase(c.transition) }
+      : { moveDur: 0 };
     renderSprites();
   }
   function highlight(id) {
@@ -307,8 +423,9 @@
     });
   }
   function restoreStage() {
+    pendingAnim = {};
     setBg(state.stage.bg || 'black');
-    renderSprites();
+    renderSprites({ snap: true });
   }
 
   /* ---------- name box tint ---------- */
@@ -440,8 +557,9 @@
       case 'set':       applySet(c.vars); return 'go';
       case 'scene':     setBg(c.bg); return asyncNext(280);
       case 'pause':     return asyncNext(c.ms || 300);
-      case 'show':      stageShow(c.who, c.expr, c.pos); return 'go';
-      case 'hide':      stageHide(c.who); return 'go';
+      case 'show':      stageShow(c.who, c.expr, c.pos, c.x, c.y, c.scale, c.transition, c.duration); return 'go';
+      case 'hide':      stageHide(c.who, c.transition, c.duration); return 'go';
+      case 'move':      stageMove(c); return 'go';
       case 'say':       doSay(c); return 'wait';
       case 'choice':    doChoice(c); return 'wait';
       case 'music':     if (A) A.music(c.name, c.opts); return 'go';
@@ -450,6 +568,7 @@
       case 'sfxStop':   if (A && A.stopFile) A.stopFile(c.name, c.fade); return 'go';
       case 'duck':      if (A) A.duck(c.amount, c.ms); return 'go';
       case 'fx':        runFx(c); return 'go';
+      case 'log':       runLog(c); return 'go';
       case 'save':      pushCheckpoint(c.label || null); return 'go';
       case 'chapterEnd': doChapterEnd(c); return 'async';
       case 'toTitle':   toTitle(); return 'wait';
@@ -572,6 +691,7 @@
     state.ptr = h.ptr;
     cancelAuto();
     clearInterval(typeTimer); typing = false;
+    pendingAnim = {};
     waiter = null; choicesOpen = false; el.choices.hidden = true;
     if (A && A.stopAllFiles) A.stopAllFiles(0.15);
     restoreStage();
@@ -753,6 +873,32 @@
       d.addEventListener('animationend', done, { once: true });
       setTimeout(done, (c.ms || 900) + 400);   // safety net
     }
+  }
+
+  /* ---------- PlayTestLog: author -> playtest.py terminal ----------
+     Resolves c.message (call it if it's a function - it gets `state`;
+     JSON-stringify an object; String() anything else) and routes it
+     through console.* so tools/devlog.js forwards it to the terminal.
+     'normal' -> dim, 'warning' -> amber, 'critical' -> red.  In a
+     shipped build there's no devlog and console.* just goes nowhere. */
+  function runLog(c) {
+    var m = c.message, text;
+    try {
+      if (typeof m === 'function') m = m(state);
+      if (typeof m === 'string') text = m;
+      else if (m == null) text = String(m);
+      else if (typeof m === 'object') {
+        try { text = JSON.stringify(m); } catch (e) { text = String(m); }
+      } else text = String(m);
+    } catch (err) {
+      console.error('VNengine: PlayTestLog message threw (op #' + (state.ptr - 1) + ') - ' +
+                    (err && err.stack || err));
+      return;
+    }
+    var lvl = c.level;
+    if (lvl === 'critical') console.error(text);
+    else if (lvl === 'warning') console.warn(text);
+    else console.log(text);
   }
 
   /* ===========================================================

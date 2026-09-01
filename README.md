@@ -29,6 +29,7 @@ music('theme', { volume: 0.5, fade: 2 }),
 bg('room'),
 show('ari', 'idle', 'left'),
 say('ari', 'Hi, {first}!', 'talk'),
+move('ari', { pos: 'center', duration: 600 }),
 choice([
   { text: 'Of course',  to: 'yes', set: { warmth: 1 } },
   { text: "Let's see",  to: 'no' }
@@ -50,8 +51,12 @@ platform is the rendering layer, not the delivery.
 `choice` branching with conditional options and variables; `set` arithmetic.
 
 **Presentation** — background crossfades; diffed expression sprites with a
-graceful labelled-placeholder fallback when art is missing; screen shake and
-flash (gated by a setting).
+graceful labelled-placeholder fallback when art is missing; author-defined
+named stage positions (inline `x`/`y` and a per-position `scale`); a `move` op
+that glides a character across the stage (position and scale animate
+together); a small enter/exit + movement transition set (`fade` / `rise` /
+`slide-left` / `slide-right`, with `duration`); screen shake and flash (gated
+by a setting).
 
 **Audio** — a synthesized sound-effect palette (16 built-in sounds, no files
 needed) plus music with crossfade, ducking and a lo-fi band-pass effect;
@@ -70,7 +75,9 @@ in-engine modals, not browser `confirm()` dialogs, so nothing ever reads
 **Authoring aids** — a boot-time script validator (unknown jump / choice
 targets, duplicate labels, unrecognised characters or sfx, unreachable ops,
 each with its op index) that reports **into the `playtest` terminal**, not
-just the browser console.
+just the browser console; plus a `PlayTestLog(message, level)` op — `message`
+can be a string, a value, or a function returning one — that prints to that
+same terminal as the story runs (a silent no-op in a shipped build).
 
 **Theming** — everything reskins from the `:root` custom properties at the top
 of `css/style.css`; fonts are bundled as woff2 (no CDN, nothing fetched from

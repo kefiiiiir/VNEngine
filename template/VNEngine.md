@@ -105,6 +105,37 @@ var CHARACTERS = {
 var SFX_FILES = { /* name: 'src/audio/sfx/whatever.mp3' */ };
 ```
 
+### Positions - `VNData.POSITIONS`
+
+Named spots on the stage. `left` / `center` / `right` are built in; add your
+own, or retune the three defaults, here:
+
+```js
+var POSITIONS = {
+  left:    { x: '18%' },
+  center:  { x: '50%' },
+  right:   { x: '82%' },
+  doorway: { x: '70%', y: '2%' },              // your own name
+  closeup: { x: '50%', y: '-6%', scale: 120 }  // nearer AND bigger
+};
+```
+
+- `x` - the sprite's horizontal **centre**, as a share of stage width.
+- `y` - how far to **lift** the sprite off the floor, as a share of stage
+  height (positive = up; negative dips it below the floor line, reading as
+  "closer"). Defaults to `0`.
+- `scale` - sprite size, `100` = normal. Optional; defaults to `100`. Grows
+  from the feet, so the character stays standing on the floor.
+- `x` / `y` values: a bare number -> pixels; a string (`'50%'`, `'12vw'`, ...)
+  passes through untouched.
+
+Omit the whole map and `left` / `center` / `right` still work. Use a name with
+`show('ari', 'idle', 'doorway')` or `move('ari', 'closeup')`; skip names and
+pass values inline (`show('ari', 'idle', { x: '70%', y: '3%' })`); or keep a
+name and add / override just the scale
+(`show('ari', 'idle', 'center', { scale: 130 })`). Any combination works - a
+missing piece falls back to the name's value, then to the default.
+
 **Graceful degradation.** Missing background -> black. Missing sprite
 key -> `idle` -> a labelled placeholder card. Missing sound/music file ->
 silence. The engine never throws on a missing asset.
@@ -157,10 +188,35 @@ inject HTML:
 | op | signature | example |
 |----|-----------|---------|
 | `bg` | `bg(name)` | `bg('room')` - crossfades to a background from `VNData.BACKGROUNDS` (or a raw path) |
-| `show` | `show(who, expr, pos)` | `show('ari', 'talk', 'left')` - `pos` is `'left'` \| `'center'` \| `'right'` |
-| `hide` | `hide(who)` | `hide('ari')` |
+| `show` | `show(who, expr, where, opts?)` | `show('ari', 'talk', 'left')` - `where` is a position **name** (`'left'` \| `'center'` \| `'right'` \| anything in `VNData.POSITIONS`) **or** an options object `{ pos, x, y, scale, transition, duration }`; when `where` is a name, an optional `opts` object adds the rest, e.g. `show('ari', 'talk', 'center', { scale: 130 })` |
+| `hide` | `hide(who, opts?)` | `hide('ari')` or `hide('ari', { transition: 'slide-right', duration: 400 })` |
+| `move` | `move(who, dest, opts?)` | `move('ari', { pos: 'right', duration: 900 })` - reposition an already-shown character; `dest` is a name or `{ pos, x, y, scale, transition, duration }`, with the same optional `opts` shorthand as `show`. `duration` (ms) smooths the glide - `x`, `y` **and** `scale` animate together; absent or `0` = instant jump. Does **not** pause the script - use `pause(ms)` to wait for it. Moving a character who was never `show`n logs a warning and is ignored. |
 
 The speaking character is auto-highlighted; the rest dim.
+
+**Transitions.** `show` / `hide` / `move` all take `transition` (which effect)
+and `duration` (ms - the length of the transition itself, *not* how long the
+character stays on screen; default 300, `0` = snap).
+
+| `show` / `hide` `transition` | effect |
+|---|---|
+| `fade` *(default)* | opacity only |
+| `rise` | fade + rises up into place on `show`; sinks + fades on `hide` |
+| `slide-left` | character is parked off the **right** edge - slides in from there on `show`, slides back out to it on `hide` |
+| `slide-right` | character is parked off the **left** edge - slides in from there on `show`, slides back out to it on `hide` |
+
+| `move` `transition` | easing |
+|---|---|
+| `glide` *(default)* | ease-in-out |
+| `linear` | constant speed |
+| `ease-in` | accelerate away |
+| `ease-out` | decelerate into the stop |
+
+`show` only plays an enter transition when the character isn't already on
+stage; re-`show`ing someone just swaps their sprite. Restoring a save,
+rolling back and jumping to a checkpoint all **snap** the stage into place
+with no animation, and `prefers-reduced-motion` drops every transition to an
+instant cut.
 
 ### Text
 
@@ -243,6 +299,31 @@ the one audio-processing effect kept as a worked example - see
 filter sweeps, ...). Music ducking under a line is also available from
 code: `VNAudio.duck(amount, ms)`.
 
+### Debug logging - `PlayTestLog`
+
+| op | signature | notes |
+|----|-----------|-------|
+| `PlayTestLog` | `PlayTestLog(message, level)` | prints a line to the **`playtest.py` terminal** (§1) as the story reaches this op - nothing shows on the game screen |
+
+- `message` - a string, **or a function** (it receives the `state` object, so
+  `s => 'warmth is ' + s.vars.warmth` works), **or any value** (objects are
+  `JSON.stringify`d, everything else `String()`d). A function that throws is
+  caught and reported instead of crashing the run.
+- `level` - `'normal'` (default, dim) · `'warning'` (amber `!`) ·
+  `'critical'` (red `✗`). An unknown level is treated as `'normal'` and noted
+  by the boot-time script check.
+
+```js
+PlayTestLog('reached the market scene'),
+PlayTestLog(s => 'gold=' + s.vars.gold + ' hp=' + s.vars.hp, 'warning'),
+PlayTestLog(() => JSON.stringify(computeRouteFlags()), 'critical'),
+```
+
+This rides the same browser -> terminal bridge as the boot-time script
+check (`tools/devlog.js`), so it only does anything when `playtest.py` has a
+console. A packaged **shipping** build has no console and `PlayTestLog` is a
+silent no-op - leave the calls in.
+
 ### Persistence
 
 | op | signature | notes |
@@ -261,8 +342,13 @@ code: `VNAudio.duck(amount, ms)`.
   every `chapterEnd`, and from the 💾 button on the in-game top bar.
 - A checkpoint stores: position as **(nearest label, offset)** plus a hash
   of the script, `vars`, player name, and the stage (background + who is
-  shown where). Up to 30 are kept; oldest non-chapter-end ones are
-  dropped first.
+  shown where, including any custom `x`/`y`). Up to 30 are kept; oldest
+  non-chapter-end ones are dropped first.
+- `move` ops and explicit `x`/`y`/`scale` on `show` count toward the
+  change-detection hash, but a `transition` / `duration` is cosmetic and does
+  not. A script that only uses `left` / `center` / `right` hashes exactly as
+  it did before these features existed, so upgrading the engine never
+  invalidates an existing save.
 - **Editing the script doesn't silently break saves.** Position is
   anchored to the nearest label, so inserting lines inside one scene
   doesn't move saves in later scenes. If the script hash no longer

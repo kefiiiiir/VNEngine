@@ -31,10 +31,21 @@
   // Deliberately excludes `say`'s dialogue text: a writer fixing a typo or
   // rewording a line shouldn't invalidate every player's save. `who` (who's
   // speaking) still counts, since swapping speakers is a structural change.
+  //
+  // Position IS structural, so `show`'s `pos` and any explicit `x`/`y`/`scale`,
+  // and the whole `move` op, are folded in. A cosmetic `transition`/`duration` on
+  // `show`/`hide`/`move` is NOT (same call as `fx`, which hashes `effect` but
+  // not `ms`). A legacy `show(who, expr, pos)` with no x/y digests to exactly
+  // `show|who|expr|pos` as before, so upgrading the engine doesn't invalidate
+  // existing saves.
+  //
+  // `log` (PlayTestLog) ops are skipped entirely - they are dev diagnostics,
+  // so adding or removing one must not flag every player's save as stale.
   function digestOps(ops) {
     var out = [];
     for (var i = 0; i < ops.length; i++) {
       var o = ops[i], s = o.op || '?';
+      if (o.op === 'log') continue;
       switch (o.op) {
         case 'say':    s += '|' + (o.who || ''); break;
         case 'label':  s += '|' + o.name; break;
@@ -42,8 +53,16 @@
         case 'if':     s += '|' + o.to + '|' + String(o.cond); break;
         case 'set':    s += '|' + safeJson(o.vars); break;
         case 'scene':  s += '|' + o.bg; break;
-        case 'show':   s += '|' + o.who + '|' + (o.expr || '') + '|' + (o.pos || ''); break;
+        case 'show':
+          s += '|' + o.who + '|' + (o.expr || '') + '|' + (o.pos || '');
+          if (o.x != null || o.y != null || o.scale != null)
+            s += '|' + (o.x || '') + '|' + (o.y || '') + '|' + (o.scale || '');
+          break;
         case 'hide':   s += '|' + o.who; break;
+        case 'move':
+          s += '|' + o.who + '|' + (o.pos || '') + '|' + (o.x || '') + '|' +
+               (o.y || '') + '|' + (o.scale || '');
+          break;
         case 'fx':     s += '|' + o.effect + '|' + (o.color || ''); break;
         case 'choice':
           s += '|' + (o.options || []).map(function (x) {

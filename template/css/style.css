@@ -217,31 +217,61 @@ body{
 
 .sprites{
   position:absolute;inset:0;
-  display:flex;align-items:flex-end;justify-content:center;
-  gap:4vw;
   pointer-events:none;
 }
+
+/* One .sprite-slot wraps each on-stage character.  The slot owns POSITION
+   (left/bottom via --vn-x/--vn-y), the ENTER/EXIT animation (opacity +
+   transform) and the MOVE glide (transitioned left/bottom).  The inner
+   .sprite / .sprite--ph stays visual-only so the idle bob never fights the
+   position or the entrance. */
+.sprite-slot{
+  position:absolute;
+  left:var(--vn-x, 50%);
+  bottom:var(--vn-y, 0%);
+  height:100%;
+  width:0;                             /* 0-width: the inner node centres on `left` */
+  display:flex;align-items:flex-end;justify-content:center;
+  opacity:0;
+  transform:translate(var(--vn-ex, 0), var(--vn-ey, 0));
+  scale:var(--vn-scale, 1);            /* position scale; grows from the feet */
+  transform-origin:bottom center;
+  transition:
+    opacity   var(--vn-dur, 300ms) var(--vn-ease, ease),
+    transform var(--vn-dur, 300ms) var(--vn-ease, ease),
+    left      var(--vn-move-dur, 0ms) var(--vn-move-ease, ease),
+    bottom    var(--vn-move-dur, 0ms) var(--vn-move-ease, ease),
+    scale     var(--vn-move-dur, 0ms) var(--vn-move-ease, ease);
+}
+.sprite-slot.is-shown{opacity:1}
+/* pre-enter / post-exit offsets, keyed by the requested transition.
+   :not(.is-shown) so they apply both on the way in and on the way out. */
+.sprite-slot:not(.is-shown)[data-enter="rise"]        {--vn-ey:6%}
+.sprite-slot:not(.is-shown)[data-enter="slide-left"]  {--vn-ex:14vw}
+.sprite-slot:not(.is-shown)[data-enter="slide-right"] {--vn-ex:-14vw}
+/* data-enter="fade" (the default): opacity only, no offset */
+
 .sprite{
   height:92%;
-  max-width:44%;
+  max-width:44vw;
   object-fit:contain;
   object-position:bottom center;
   filter:drop-shadow(0 12px 26px rgba(0,0,0,.45));
-  transition:opacity .3s ease, transform .3s ease, filter .3s ease;
-  transform:translateY(4%);
-  opacity:0;
   animation:spriteBob 4.5s ease-in-out infinite;
 }
-.sprite.is-shown{opacity:1;transform:translateY(0)}
-.sprite[data-pos="left"]{margin-right:auto;margin-left:2vw}
-.sprite[data-pos="right"]{margin-left:auto;margin-right:2vw}
-.sprite[data-pos="center"]{margin:0 auto}
-.sprite.is-dim{filter:drop-shadow(0 12px 26px rgba(0,0,0,.45)) brightness(.55) saturate(.7)}
-.sprite.is-speaking{filter:drop-shadow(0 0 0 transparent) drop-shadow(0 12px 26px rgba(0,0,0,.45)) brightness(1.05)}
+.sprite-slot.is-dim .sprite,
+.sprite-slot.is-dim .sprite--ph{filter:drop-shadow(0 12px 26px rgba(0,0,0,.45)) brightness(.55) saturate(.7)}
+.sprite-slot.is-speaking .sprite,
+.sprite-slot.is-speaking .sprite--ph{filter:drop-shadow(0 0 0 transparent) drop-shadow(0 12px 26px rgba(0,0,0,.45)) brightness(1.05)}
+
+/* snap hook: renderSprites({snap:true}) adds .vn-no-anim for one frame so
+   restore / rollback / checkpoint loads jump straight to the saved stage. */
+.sprites.vn-no-anim .sprite-slot{transition:none !important}
+.sprites.vn-no-anim .sprite{animation:none !important}
 
 /* placeholder card for characters with no sprite */
 .sprite--ph{
-  width:min(30%,320px);
+  width:min(26vw,300px);
   height:74%;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.6rem;
   border-radius:18px;
@@ -262,8 +292,8 @@ body{
   font-family:var(--font-body);font-size:.78rem;
   opacity:.72;letter-spacing:.14em;text-transform:uppercase;
 }
-.sprite--ph.is-dim{opacity:.5}
-.sprite--ph.is-speaking{border-style:solid;transform:translateY(-1%)}
+.sprite-slot.is-dim .sprite--ph{opacity:.5}
+.sprite-slot.is-speaking .sprite--ph{border-style:solid;transform:translateY(-1%)}
 
 @keyframes spriteBob{
   0%,100%{transform:translateY(0)}
@@ -512,6 +542,8 @@ body.fx-shake #game{animation:fxShake .4s linear}
 
 @media (prefers-reduced-motion: reduce){
   body.fx-shake #game{animation:none}
+  .sprite-slot{transition-duration:0ms !important}
+  .sprite{animation:none !important}
 }
 
 /* portrait / small screens */

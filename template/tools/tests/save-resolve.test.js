@@ -28,6 +28,17 @@ function test(name, fn) {
 function say(who, text) { return { op: 'say', who: who, text: text }; }
 function label(name) { return { op: 'label', name: name }; }
 function jump(to) { return { op: 'jump', to: to }; }
+function show(who, expr, pos) { return { op: 'show', who: who, expr: expr, pos: pos }; }
+function showXY(who, expr, extra) {
+  var o = { op: 'show', who: who, expr: expr, pos: null };
+  for (var k in extra) o[k] = extra[k];
+  return o;
+}
+function move(who, extra) {
+  var o = { op: 'move', who: who };
+  for (var k in extra) o[k] = extra[k];
+  return o;
+}
 
 // A small script with two labels ("start", "act2"), each with a few `say`
 // lines, mirroring how real story.js scripts are shaped.
@@ -88,6 +99,76 @@ test('digestOps: different digest when op order changes', () => {
   // itself is no longer hashed.
   const tmp = b[1]; b[1] = b[3]; b[3] = tmp;
   assert.notStrictEqual(SR.digestOps(a), SR.digestOps(b));
+});
+
+test('digestOps: legacy show(who,expr,pos) digests to exactly "show|who|expr|pos"', () => {
+  // Guards the upgrade-safety guarantee: a project that only uses
+  // left/center/right must hash byte-for-byte as it did before x/y/move
+  // existed, so existing player saves don't trip the "out of date" prompt.
+  const line = SR.digestOps([show('ari', 'idle', 'left')]);
+  assert.strictEqual(line, 'show|ari|idle|left');
+});
+
+test('digestOps: explicit x/y/scale on show changes the digest', () => {
+  const a = SR.digestOps([show('ari', 'idle', 'left')]);
+  const b = SR.digestOps([showXY('ari', 'idle', { x: '30%' })]);
+  assert.notStrictEqual(a, b);
+  const c = SR.digestOps([showXY('ari', 'idle', { x: '30%', y: '5%' })]);
+  assert.notStrictEqual(b, c);
+  // scale alone (named position, no x/y) still shifts the hash
+  const named = SR.digestOps([show('ari', 'idle', 'left')]);
+  const scaled = SR.digestOps([{ op: 'show', who: 'ari', expr: 'idle', pos: 'left', scale: 150 }]);
+  assert.notStrictEqual(named, scaled);
+});
+
+test('digestOps: transition/duration on show do NOT change the digest', () => {
+  const a = SR.digestOps([show('ari', 'idle', 'left')]);
+  const b = SR.digestOps([showXY('ari', 'idle',
+    { pos: 'left', transition: 'slide-right', duration: 450 })]);
+  // showXY sets pos:null then overwrites with pos:'left' -> same pos, no x/y,
+  // cosmetic fields ignored -> identical digest.
+  assert.strictEqual(a, b);
+});
+
+test('digestOps: a move op changes the digest', () => {
+  const base = fixtureScript();
+  const withMove = fixtureScript();
+  withMove.splice(2, 0, move('ari', { pos: 'right', duration: 900 }));
+  assert.notStrictEqual(SR.digestOps(base), SR.digestOps(withMove));
+});
+
+test('digestOps: move who/pos/x/y/scale each change the digest', () => {
+  const p = SR.digestOps([move('ari', { pos: 'right' })]);
+  assert.notStrictEqual(p, SR.digestOps([move('mio', { pos: 'right' })]));
+  assert.notStrictEqual(p, SR.digestOps([move('ari', { pos: 'left' })]));
+  assert.notStrictEqual(p, SR.digestOps([move('ari', { x: '60%' })]));
+  assert.notStrictEqual(SR.digestOps([move('ari', { x: '60%' })]),
+                        SR.digestOps([move('ari', { x: '60%', y: '4%' })]));
+  assert.notStrictEqual(p, SR.digestOps([move('ari', { pos: 'right', scale: 120 })]));
+});
+
+test('digestOps: transition/duration on move do NOT change the digest', () => {
+  const a = SR.digestOps([move('ari', { pos: 'right' })]);
+  const b = SR.digestOps([move('ari', { pos: 'right', duration: 900, transition: 'ease-out' })]);
+  assert.strictEqual(a, b);
+});
+
+test('digestOps: PlayTestLog (log) ops are ignored - adding one does not change the digest', () => {
+  const base = fixtureScript();
+  const withLog = fixtureScript();
+  withLog.splice(2, 0,
+    { op: 'log', message: 'debug: here', level: 'normal' },
+    { op: 'log', message: () => 'x', level: 'critical' });
+  assert.strictEqual(SR.digestOps(base), SR.digestOps(withLog));
+});
+
+test('resolvePos round-trips through a script containing move ops', () => {
+  const ops = fixtureScript();
+  ops.splice(2, 0, move('ari', { pos: 'right', duration: 600 }));
+  const info = SR.buildLabels(ops);
+  const ptr = 8; // still under label 'act2'
+  const pos = SR.posFromPtr(info.labels, info.sorted, ptr);
+  assert.strictEqual(SR.resolvePos(info.labels, ops.length, pos), ptr);
 });
 
 /* ================= buildLabels / segmentNameAt ================= */

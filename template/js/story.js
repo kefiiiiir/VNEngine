@@ -22,8 +22,55 @@
   function narr(text)           { return { op: 'say', who: null, text: text }; }   // narration
   function mc(text)             { return { op: 'say', who: 'mc', text: text }; }    // player's own voice
   function bg(name)             { return { op: 'scene', bg: name }; }
-  function show(who, expr, pos) { return { op: 'show', who: who, expr: expr || 'idle', pos: pos || 'center' }; }
-  function hide(who)            { return { op: 'hide', who: who }; }
+  // `where` for show/move is a position NAME ('left' | 'center' | 'right' |
+  // any name from VNData.POSITIONS) OR an options object.  An options object
+  // (as `where`, or as an extra 4th/3rd arg after a name) may carry:
+  //   pos        a position name
+  //   x, y       inline coords - x = sprite centre (share of stage width),
+  //              y = lift off the floor (positive = up)
+  //   scale      sprite size, 100 = normal; overrides / adds to the name's
+  //   transition show/hide: 'fade' (default) | 'rise' | 'slide-left' | 'slide-right'
+  //              move:      'glide' (default) | 'linear' | 'ease-in' | 'ease-out'
+  //   duration   ms for the transition / glide (show/hide default 300; 0 = snap)
+  function placement(where, opts) {
+    var w = (where && typeof where === 'object') ? where : {};
+    var o = opts || {};
+    var pick = function (k) { return o[k] != null ? o[k] : w[k]; };
+    return {
+      pos: (typeof where === 'string' ? where : w.pos) || null,
+      x: pick('x'), y: pick('y'), scale: pick('scale'),
+      transition: pick('transition'), duration: pick('duration')
+    };
+  }
+  // show(who, expr, 'left')  /  show(who, expr, { pos:'left', scale:120 })
+  //   /  show(who, expr, 'left', { scale:120, transition:'rise' })
+  function show(who, expr, where, opts) {
+    var p = placement(where, opts);
+    return {
+      op: 'show', who: who, expr: expr || 'idle',
+      pos: p.pos || 'center', x: p.x, y: p.y, scale: p.scale,
+      transition: p.transition, duration: p.duration
+    };
+  }
+  // hide(who) or hide(who, { transition, duration }) - same transition names
+  // as show; the character exits that way instead of a plain fade.
+  function hide(who, opts) {
+    opts = opts || {};
+    return { op: 'hide', who: who, transition: opts.transition, duration: opts.duration };
+  }
+  // move(who, dest[, opts]) - reposition an already-shown character WITHOUT
+  // hide/show.  `dest` is a name or an options object; `opts` is an optional
+  // extra object when `dest` is a name.  duration (ms) smooths the glide -
+  // x, y AND scale all animate together; absent or 0 = instant jump.  Does
+  // not pause the script - use pause(ms) to wait for it.
+  function move(who, dest, opts) {
+    var p = placement(dest, opts);
+    return {
+      op: 'move', who: who,
+      pos: p.pos, x: p.x, y: p.y, scale: p.scale,
+      transition: p.transition, duration: p.duration
+    };
+  }
   function label(name)          { return { op: 'label', name: name }; }
   function jump(to)             { return { op: 'jump', to: to }; }
   function iff(cond, to)        { return { op: 'if', cond: cond, to: to }; }
@@ -38,6 +85,13 @@
   function sfx(name, opts)      { return { op: 'sfx', name: name, opts: opts || {} }; }
   function pause(ms)            { return { op: 'pause', ms: ms }; }
   function fx(effect, opt)      { var o = { op: 'fx', effect: effect }; if (opt) for (var k in opt) o[k] = opt[k]; return o; }
+  // PlayTestLog(message, level) - print a line to the playtest.py terminal as
+  // the story runs (dev only; a shipped game has no console and drops it).
+  //   message : a string, OR a function that returns something to show (it is
+  //             passed the state object: s => `warmth is ${s.vars.warmth}`),
+  //             OR any value - objects are JSON-stringified.
+  //   level   : 'normal' (default, dim) | 'warning' (amber) | 'critical' (red)
+  function PlayTestLog(message, level) { return { op: 'log', message: message, level: level || 'normal' }; }
   function saveOp(label)        { return { op: 'save', label: label || null }; }
   function chapterEnd(t, next)  { return { op: 'chapterEnd', title: t, next: next || null }; }
   function toMenu()             { return { op: 'toTitle' }; }
@@ -63,6 +117,9 @@
     mc('(Two people, one question already.)'),
 
     set({ coins: 3 }),
+    // PlayTestLog prints to the playtest.py terminal, not the game screen.
+    PlayTestLog('demo: reached the coins scene'),
+    PlayTestLog(function (s) { return 'demo: coins=' + s.vars.coins + ' player=' + s.player.first; }),
     narr('You have [b]{coins}[/b] coins in your pocket - [i]{name}[/i]-level wealth.'),
 
     say('ari', 'Quick one: are we friends?', 'talk'),
@@ -79,7 +136,30 @@
     say('ari', 'Fair. Honest, at least.', 'bad'),
 
     label('after_choice'),
+    PlayTestLog(function (s) { return 'demo: warmth after the choice = ' + (s.vars.warmth || 0); }, 'warning'),
+    PlayTestLog('demo: this is what a "critical" line looks like', 'critical'),
     hide('mio'),
+
+    // --- positions & movement demo -------------------------------------
+    say('ari', 'Watch this - Mio can slide back in instead of popping.', 'talk'),
+    show('mio', 'idle', { pos: 'right', transition: 'slide-left', duration: 450 }),
+    say('mio', 'Slid in from the edge.', 'idle'),
+    move('mio', { pos: 'doorway', duration: 700 }),
+    say('mio', 'And now I am on "doorway" - a spot this project defined in data.js.', 'idle'),
+    say('ari', 'My turn. Watch me cross the stage - no hide, no re-show.', 'point'),
+    move('ari', { pos: 'right', duration: 900 }),
+    say('ari', 'Smooth glide.', 'talk'),
+    move('ari', { pos: 'center', duration: 600, transition: 'ease-out' }),
+    say('ari', 'Centre stage, easing to a stop.', 'talk'),
+    move('ari', 'center', { scale: 128, duration: 500 }),
+    say('ari', 'Same spot - just leaning in. That is the scale param.', 'talk'),
+    move('ari', 'closeup', { duration: 500 }),
+    say('ari', 'And "closeup" bakes its own scale straight into the position.', 'talk'),
+    move('ari', 'center', { duration: 400 }),
+    hide('mio', { transition: 'slide-left', duration: 400 }),
+    say('ari', 'And Mio slid back out the way she came.', 'idle'),
+    // -----------------------------------------------------------------
+
     say('ari', 'Watch - the screen can react too.', 'point'),
     fx('shake'),
     fx('flash', { color: 'white' }),

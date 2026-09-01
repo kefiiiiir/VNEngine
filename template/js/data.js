@@ -52,6 +52,26 @@
     }
   };
 
+  /* name -> stage position.
+       x     : horizontal centre of the sprite (share of stage width)
+       y     : lift off the floor (share of stage height, positive = up; default 0)
+       scale : sprite size, 100 = normal (optional; default 100)
+     x / y values: a bare number -> px; a string ('50%', '12vw', ...) passes
+     through.  Use a name in a script with  show('ari', 'idle', 'doorway')  or
+     move('ari', 'closeup').  Omit this whole map and left/center/right still
+     work; define only the new names you want and the three built-ins remain.
+     You can also skip names and pass values inline, or add / override a
+     position's scale from code:
+       show('ari', 'idle', { x: '70%', y: '3%', scale: 90 })
+       show('ari', 'idle', 'center', { scale: 130 }) */
+  var POSITIONS = {
+    left:    { x: '18%' },
+    center:  { x: '50%' },
+    right:   { x: '82%' },
+    doorway: { x: '70%', y: '2%' },              // author-defined - used by the demo
+    closeup: { x: '50%', y: '-6%', scale: 120 }  // nearer the camera AND bigger
+  };
+
   /* Optional: extra sound effects loaded from audio files (short mp3/ogg/wav).
      In a script,  sfx('name')  first looks for a synthesized sound in
      audio.js, then for a file registered here.  Empty by default. */
@@ -75,6 +95,7 @@
   global.VNData = {
     BACKGROUNDS: BACKGROUNDS,
     CHARACTERS: CHARACTERS,
+    POSITIONS: POSITIONS,
     SFX_FILES: SFX_FILES,
     EXPRESSIONS: EXPRESSIONS,
     PRELOAD: PRELOAD
