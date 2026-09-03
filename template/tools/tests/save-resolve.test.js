@@ -41,7 +41,7 @@ function move(who, extra) {
 }
 
 // A small script with two labels ("start", "act2"), each with a few `say`
-// lines, mirroring how real story.js scripts are shaped.
+// lines, mirroring how real chapter scripts are shaped.
 function fixtureScript() {
   return [
     label('start'),           // 0

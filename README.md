@@ -152,7 +152,7 @@ cd <YourProject>
 playtest            # or:  python playtest.py
 ```
 
-Opens the game in a native window; edit `js/story.js` / `js/data.js`, reload
+Opens the game in a native window; edit `js/story/chapter1.js` / `js/data.js`, reload
 (the server sends `no-store`, so there's no cache to bust), repeat. The
 terminal shows the boot-time script check and any runtime errors. Closing the
 window stops the server.
@@ -199,7 +199,10 @@ only rebuild when `playtest.py` changes. After that it's just copy + zip.
 index.html        screens + the DOM the engine drives
 css/style.css     all styling; theme via the :root variables at the top
 js/data.js        your assets manifest  -> window.VNData     (EDIT THIS)
-js/story.js       your script           -> window.VNScript   (EDIT THIS)
+js/story/         your script - see js/story/README.md       (EDIT THIS)
+  chapter1.js       chapter 1 -> window.VNScript
+  chapter2.js       chapter 2 -> window.VNScript  (add more chapterN.js as needed)
+  story-helpers.js  op builders (say, bg, show, ...) shared by every chapter file
 js/audio.js       music + sound engine  -> window.VNAudio    (reusable as-is)
 js/save-resolve.js  save/position hashing + resolution (usually left alone)
 js/engine.js      the runtime           (usually left alone)

@@ -5,7 +5,7 @@
 
    Reads:
      window.VNData   - backgrounds / characters      (js/data.js)
-     window.VNScript - the script: { ops: [...] }     (js/story.js)
+     window.VNScript - the script: { ops: [...] }     (js/story/chapter1.js, js/story/chapter2.js, ... via js/story/story-helpers.js)
      window.VNAudio  - music / sfx engine (optional)  (js/audio.js)
    =========================================================== */
 (function () {
